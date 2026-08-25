@@ -26,6 +26,7 @@ export interface FortyGuardApiResponse {
     canopyCoveragePct: number;
     imperviousSurfacePct: number;
     gridResolutionMeters: number;
+    airQualityAqi?: number;
     microclimateZones?: Array<{
       zoneId: string;
       name: string;
@@ -47,7 +48,17 @@ const fortyguardCache = new Map<string, { timestamp: number; response: FortyGuar
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
 export function getRegionalClimate(lat: number, lng: number) {
-  // Check exact hotspot cities first
+  // Predefined Hotspot AQI & Climate mapping
+  const aqiCityMap: Record<string, number> = {
+    phoenix: 82,
+    'las-vegas': 78,
+    houston: 84,
+    dallas: 76,
+    miami: 42,
+    'los-angeles': 96,
+    austin: 58,
+  };
+
   const matched = HOT_US_CITIES.find(
     c => Math.hypot(c.lat - lat, c.lng - lng) < 0.6
   );
@@ -57,6 +68,18 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: matched.baseHumidity,
       treeCanopyAverage: matched.treeCanopyAverage,
       uhiIntensity: matched.urbanHeatIslandIntensity,
+      baseAqi: aqiCityMap[matched.id] ?? 65,
+    };
+  }
+
+  // Northern Plains / Montana / Dakotas / Wyoming (lat >= 43, lng between -95 and -115): pristine air
+  if (lat >= 43 && lng <= -95 && lng >= -115) {
+    return {
+      baseTempF: 81.5 + (Math.sin(lat * 3) * 2),
+      baseHumidity: 42,
+      treeCanopyAverage: 26,
+      uhiIntensity: '+3.5°F open terrain delta',
+      baseAqi: 28, // Clean Good AQI
     };
   }
 
@@ -67,6 +90,7 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: 58,
       treeCanopyAverage: 22,
       uhiIntensity: '+7.8°F urban canyon heat retention',
+      baseAqi: 62, // Moderate urban AQI
     };
   }
 
@@ -77,6 +101,7 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: 64,
       treeCanopyAverage: 24,
       uhiIntensity: '+6.2°F metropolitan corridor delta',
+      baseAqi: 54, // Moderate Midwest AQI
     };
   }
 
@@ -87,6 +112,7 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: 74,
       treeCanopyAverage: 28,
       uhiIntensity: '+5.5°F high-humidity thermal index',
+      baseAqi: 46,
     };
   }
 
@@ -97,6 +123,7 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: 16,
       treeCanopyAverage: 9,
       uhiIntensity: '+8.2°F asphalt radiation delta',
+      baseAqi: 80,
     };
   }
 
@@ -107,6 +134,7 @@ export function getRegionalClimate(lat: number, lng: number) {
       baseHumidity: 48,
       treeCanopyAverage: 18,
       uhiIntensity: '+7.1°F suburban freeway grid',
+      baseAqi: 68,
     };
   }
 
@@ -118,6 +146,7 @@ export function getRegionalClimate(lat: number, lng: number) {
     baseHumidity: 50,
     treeCanopyAverage: 20,
     uhiIntensity: '+6.0°F urban core delta',
+    baseAqi: Math.round(35 + (latFactor * 25)),
   };
 }
 
@@ -220,6 +249,13 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
         // Parse solar radiation
         const solarRad = raw.solar_irradiance ?? raw.solar_radiation_wm2 ?? raw.solar_radiation ?? (650 + ambientF * 2);
 
+        // Parse Air Quality (AQI) from FortyGuard or dynamic regional model
+        const parsedAqi = raw.aqi ?? raw.air_quality_index ?? raw.airQualityAqi ?? raw.air_quality;
+        const dynamicAqi = Math.round(
+          climate.baseAqi + (ambientF > 100 ? 16 : ambientF > 90 ? 8 : 0) + (humidity > 60 ? 6 : 0)
+        );
+        const airQualityAqi = typeof parsedAqi === 'number' ? Math.round(parsedAqi) : dynamicAqi;
+
         const resultResponse: FortyGuardApiResponse = {
           status: 'success',
           provider: 'FortyGuard Hyperlocal Live API',
@@ -238,6 +274,7 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
             canopyCoveragePct: raw.canopy_coverage_pct ?? climate.treeCanopyAverage,
             imperviousSurfacePct: raw.impervious_pct ?? raw.impervious_surface_pct ?? 78,
             gridResolutionMeters: raw.resolution_m ?? 50,
+            airQualityAqi,
             microclimateZones: raw.zones ?? raw.microclimate_zones,
           },
         };
@@ -254,6 +291,9 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
   const baseTemp = climate.baseTempF;
   const baseHumidity = climate.baseHumidity;
   const surfaceTemp = baseTemp + 26.5 + (Math.cos(lng * 8) * 4);
+  const fallbackAqi = Math.round(
+    climate.baseAqi + (baseTemp > 100 ? 16 : baseTemp > 90 ? 8 : 0) + (baseHumidity > 60 ? 6 : 0)
+  );
 
   const fallbackResponse: FortyGuardApiResponse = {
     status: 'fallback',
@@ -273,6 +313,7 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
       canopyCoveragePct: climate.treeCanopyAverage,
       imperviousSurfacePct: 82,
       gridResolutionMeters: 50,
+      airQualityAqi: fallbackAqi,
     },
   };
 

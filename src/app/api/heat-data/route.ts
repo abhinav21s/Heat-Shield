@@ -97,7 +97,8 @@ export async function GET(request: NextRequest) {
   const report = buildHeatReportForLocation(
     location,
     fgResponse.data.ambientTemperatureF,
-    fgResponse.data.relativeHumidity
+    fgResponse.data.relativeHumidity,
+    fgResponse.data.airQualityAqi
   );
   report.dataSource = fgResponse.status === 'success' 
     ? 'FortyGuard Hyperlocal API' 

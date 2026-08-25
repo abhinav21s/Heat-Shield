@@ -312,7 +312,7 @@ export function generateLocalCoolingCenters(centerLat: number, centerLng: number
 /**
  * Builds a complete HeatReportData object for any location
  */
-export function buildHeatReportForLocation(location: LocationInfo, tempOverride?: number, humidityOverride?: number): HeatReportData {
+export function buildHeatReportForLocation(location: LocationInfo, tempOverride?: number, humidityOverride?: number, aqiOverride?: number): HeatReportData {
   // Find matching predefined city or interpolate dynamically
   const matched = HOT_US_CITIES.find(
     c => Math.abs(c.lat - location.lat) < 0.3 && Math.abs(c.lng - location.lng) < 0.3
@@ -336,7 +336,12 @@ export function buildHeatReportForLocation(location: LocationInfo, tempOverride?
   const uvIndex = Math.min(12, Math.max(3, Math.round(temperatureF > 100 ? 11 : temperatureF > 90 ? 9 : 7)));
   const solarRadiation = Math.round(650 + (temperatureF * 2.8));
   const windSpeedMph = Math.round((4 + (Math.abs(location.lng * 2) % 8)) * 10) / 10;
-  const airQualityAqi = Math.round(45 + (temperatureF > 100 ? 55 : 25));
+  
+  // Dynamic AQI based on location coordinates, ozone formation, and temperature
+  const defaultRegionalAqi = location.lat >= 43 && location.lng <= -95 ? 28 : (location.lat < 35 && location.lng < -115 ? 92 : 58);
+  const airQualityAqi = aqiOverride ?? Math.round(
+    defaultRegionalAqi + (temperatureF > 100 ? 18 : temperatureF > 90 ? 8 : 0) + (humidity > 60 ? 6 : 0)
+  );
 
   const riskScore = calculateRiskScore({ temperatureF, feelsLikeF, wbgtF, uvIndex });
   const riskLevel = getRiskLevelFromScore(riskScore);
