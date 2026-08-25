@@ -34,7 +34,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
 
-  const fetchHeatData = useCallback(async (params: { lat?: number; lng?: number; city?: string }) => {
+  const fetchHeatData = useCallback(async (params: { lat?: number; lng?: number; city?: string; label?: string }) => {
     setIsLoading(true);
     setError(null);
     try {
@@ -43,8 +43,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       if (params.lat !== undefined && params.lng !== undefined) {
         searchParams.append('lat', params.lat.toString());
         searchParams.append('lng', params.lng.toString());
+        if (params.label) {
+          searchParams.append('label', params.label);
+        }
       } else if (params.city) {
         searchParams.append('city', params.city);
+        if (params.label) {
+          searchParams.append('label', params.label);
+        }
       }
       const qs = searchParams.toString();
       if (qs) {
@@ -66,12 +72,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       // Fallback directly to local generator so the user always has a seamless experience
       const defaultCity = HOT_US_CITIES[0];
       const fallbackReport = buildHeatReportForLocation({
-        name: `${defaultCity.name}, ${defaultCity.state}`,
+        name: params.label || `${defaultCity.name}, ${defaultCity.state}`,
         city: defaultCity.name,
         state: defaultCity.state,
         country: defaultCity.country,
-        lat: defaultCity.lat,
-        lng: defaultCity.lng,
+        lat: params.lat ?? defaultCity.lat,
+        lng: params.lng ?? defaultCity.lng,
       });
       setReport(fallbackReport);
       setError(null);
@@ -110,7 +116,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const setLocationByCoordinates = async (lat: number, lng: number, label?: string) => {
     setIsLocationModalOpen(false);
     setHasStarted(true);
-    await fetchHeatData({ lat, lng });
+    await fetchHeatData({ lat, lng, label });
   };
 
   const requestGeolocation = async (): Promise<boolean> => {
