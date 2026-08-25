@@ -10,6 +10,11 @@ export const metadata: Metadata = {
   title: 'HeatShield – Real-Time Urban Heat Protection',
   description: 'Understand your personal and area-level urban heat risk in real time. Powered by hyperlocal thermal models and actionable safety guidance.',
   keywords: ['urban heat', 'heat risk', 'heat shield', 'extreme heat protection', 'heat wave', 'wet bulb globe temperature'],
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default function RootLayout({

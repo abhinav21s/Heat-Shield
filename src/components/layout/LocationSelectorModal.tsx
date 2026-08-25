@@ -1,25 +1,71 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Search, Navigation, MapPin, Building, Flame, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Navigation, MapPin, Building, Flame, Check, Loader2, Compass } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { useLocation } from '@/context/LocationContext';
 import { HOT_US_CITIES, PredefinedCity } from '@/lib/mockHeatData';
 
+interface GeocodedResult {
+  id: string;
+  name: string;
+  city: string;
+  state: string;
+  country: string;
+  lat: number;
+  lng: number;
+  formattedAddress: string;
+}
+
 export function LocationSelectorModal() {
   const { isLocationModalOpen, closeLocationModal, setLocationByCity, setLocationByCoordinates, requestGeolocation, report } = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
+  const [liveResults, setLiveResults] = useState<GeocodedResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [customLat, setCustomLat] = useState('');
   const [customLng, setCustomLng] = useState('');
   const [isLocating, setIsLocating] = useState(false);
 
-  const filteredCities = HOT_US_CITIES.filter(
+  // Live Geocoding Search Debounce
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) {
+      setLiveResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.results)) {
+            setLiveResults(json.results);
+          }
+        }
+      } catch (err) {
+        console.error('Geocoding search failed:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const filteredPresetCities = HOT_US_CITIES.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleSelectGeocoded = (item: GeocodedResult) => {
+    setLocationByCoordinates(item.lat, item.lng, item.name);
+    closeLocationModal();
+  };
 
   const handleUseMyLocation = async () => {
     setIsLocating(true);
@@ -45,7 +91,7 @@ export function LocationSelectorModal() {
       isOpen={isLocationModalOpen}
       onClose={closeLocationModal}
       title="Select Heat Monitoring Location"
-      description="Choose your city, use GPS geolocation, or enter custom coordinates."
+      description="Search any city or neighborhood, use GPS geolocation, or select a heat hotspot."
       maxWidth="lg"
     >
       <div className="space-y-6">
@@ -75,12 +121,57 @@ export function LocationSelectorModal() {
           <Search className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-secondary" />
           <input
             type="text"
-            placeholder="Search key cities (e.g. Phoenix, Houston, Las Vegas, Miami)..."
+            placeholder="Type any city or neighborhood (e.g. Manhattan, Indiana, Chicago, Austin)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-11 pr-4 py-3 bg-brand-surface border border-brand-border rounded-xl text-sm text-ink-primary placeholder:text-ink-secondary/70 focus:outline-none focus:ring-2 focus:ring-brand/40"
+            className="w-full pl-11 pr-10 py-3 bg-brand-surface border border-brand-border rounded-xl text-sm text-ink-primary placeholder:text-ink-secondary/70 focus:outline-none focus:ring-2 focus:ring-brand/40"
           />
+          {isSearching && (
+            <Loader2 className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-brand animate-spin" />
+          )}
         </div>
+
+        {/* Live Search Results (When typing) */}
+        {searchQuery.trim().length >= 2 && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-ink-secondary flex items-center gap-1.5">
+              <Compass className="w-4 h-4 text-brand" /> Live Search Results
+            </h4>
+
+            {liveResults.length > 0 ? (
+              <div className="divide-y divide-brand-border/60 rounded-xl border border-brand-border bg-white/70 overflow-hidden shadow-sm">
+                {liveResults.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSelectGeocoded(item)}
+                    className="w-full px-4 py-3 text-left hover:bg-brand/10 transition-colors flex items-center justify-between group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0">
+                        <MapPin className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-ink-primary group-hover:text-brand transition-colors">
+                          {item.name}
+                        </p>
+                        <p className="text-[11px] text-ink-secondary">
+                          Lat: {item.lat.toFixed(4)}, Lng: {item.lng.toFixed(4)}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-brand opacity-0 group-hover:opacity-100 transition-opacity">
+                      Select →
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : !isSearching ? (
+              <div className="p-4 rounded-xl bg-brand-surface/60 border border-brand-border text-center text-xs text-ink-secondary">
+                No matching locations found for "{searchQuery}".
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Hotspot Cities Grid */}
         <div>
@@ -88,7 +179,7 @@ export function LocationSelectorModal() {
             <Flame className="w-4 h-4 text-brand" /> Major Urban Heat Hotspots
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {filteredCities.map((city: PredefinedCity) => {
+            {filteredPresetCities.map((city: PredefinedCity) => {
               const isSelected = report?.location.city.toLowerCase() === city.name.toLowerCase();
               return (
                 <button
