@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
   const latParam = searchParams.get('lat');
   const lngParam = searchParams.get('lng');
   const cityParam = searchParams.get('city');
+  const labelParam = searchParams.get('label') || searchParams.get('name');
 
   let location: LocationInfo;
 
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     );
     if (matchedCity) {
       location = {
-        name: `${matchedCity.name}, ${matchedCity.state}`,
+        name: labelParam || `${matchedCity.name}, ${matchedCity.state}`,
         city: matchedCity.name,
         state: matchedCity.state,
         country: matchedCity.country,
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       };
     } else {
       location = {
-        name: cityParam,
+        name: labelParam || cityParam,
         city: cityParam,
         state: 'US',
         country: 'USA',
@@ -38,29 +39,46 @@ export async function GET(request: NextRequest) {
     const lat = parseFloat(latParam);
     const lng = parseFloat(lngParam);
 
-    // Try to find closest known city name
-    let closestCity = HOT_US_CITIES[0];
-    let minDistance = 999999;
-    for (const city of HOT_US_CITIES) {
-      const dist = Math.hypot(city.lat - lat, city.lng - lng);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestCity = city;
+    if (labelParam && labelParam.trim().length > 0) {
+      const parts = labelParam.split(',').map(s => s.trim());
+      const cityName = parts[0] || 'Selected Location';
+      const stateName = parts[1] || 'US';
+
+      location = {
+        name: labelParam,
+        district: cityName,
+        city: cityName,
+        state: stateName,
+        country: parts[2] || 'USA',
+        lat,
+        lng,
+        isUserLocation: true,
+      };
+    } else {
+      // Try to find closest known city name
+      let closestCity = HOT_US_CITIES[0];
+      let minDistance = 999999;
+      for (const city of HOT_US_CITIES) {
+        const dist = Math.hypot(city.lat - lat, city.lng - lng);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestCity = city;
+        }
       }
+
+      const isClose = minDistance < 0.6;
+
+      location = {
+        name: isClose ? `${closestCity.name} Metro Area` : `${closestCity.name} Region (${lat.toFixed(2)}, ${lng.toFixed(2)})`,
+        district: isClose ? `${closestCity.name} Central` : 'Selected Coordinates',
+        city: isClose ? closestCity.name : 'Selected Location',
+        state: isClose ? closestCity.state : 'US',
+        country: 'USA',
+        lat,
+        lng,
+        isUserLocation: true,
+      };
     }
-
-    const isClose = minDistance < 0.6;
-
-    location = {
-      name: isClose ? `${closestCity.name} Metro Area` : `Coordinates (${lat.toFixed(3)}, ${lng.toFixed(3)})`,
-      district: isClose ? `${closestCity.name} Central` : 'Selected Coordinates',
-      city: isClose ? closestCity.name : 'Selected Location',
-      state: isClose ? closestCity.state : 'US',
-      country: 'USA',
-      lat,
-      lng,
-      isUserLocation: true,
-    };
   } else {
     // Default fallback to Phoenix
     const defaultCity = HOT_US_CITIES[0];
@@ -79,7 +97,8 @@ export async function GET(request: NextRequest) {
   const report = buildHeatReportForLocation(
     location,
     fgResponse.data.ambientTemperatureF,
-    fgResponse.data.relativeHumidity
+    fgResponse.data.relativeHumidity,
+    fgResponse.data.airQualityAqi
   );
   report.dataSource = fgResponse.status === 'success' 
     ? 'FortyGuard Hyperlocal API' 
