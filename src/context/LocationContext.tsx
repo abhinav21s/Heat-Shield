@@ -75,13 +75,19 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       console.error('Heat data fetch error:', err);
       // Fallback directly to local generator so the user always has a seamless experience
       const defaultCity = HOT_US_CITIES[0];
+      const fallbackLat = params.lat ?? defaultCity.lat;
+      const fallbackLng = params.lng ?? defaultCity.lng;
+      // Resolve a city name: if city param was given try to match it, otherwise use coords
+      const matchedCity = params.city
+        ? HOT_US_CITIES.find(c => c.id === params.city?.toLowerCase() || c.name.toLowerCase() === params.city?.toLowerCase())
+        : null;
       const fallbackReport = buildHeatReportForLocation({
-        name: params.label || `${defaultCity.name}, ${defaultCity.state}`,
-        city: defaultCity.name,
-        state: defaultCity.state,
-        country: defaultCity.country,
-        lat: params.lat ?? defaultCity.lat,
-        lng: params.lng ?? defaultCity.lng,
+        name: params.label || matchedCity?.name || (params.city ? params.city : `${defaultCity.name}, ${defaultCity.state}`),
+        city: matchedCity?.name || params.city || defaultCity.name,
+        state: matchedCity?.state || defaultCity.state,
+        country: matchedCity?.country || defaultCity.country,
+        lat: fallbackLat,
+        lng: fallbackLng,
       });
       setReport(fallbackReport);
       setError(null);

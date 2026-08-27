@@ -26,13 +26,15 @@ export async function GET(request: NextRequest) {
         lng: matchedCity.lng,
       };
     } else {
+      // Unknown city string — use coordinates (0,0) as sentinel; fortyguard fallback will handle it
+      // The label is preserved so the report shows the user's typed city name
       location = {
         name: labelParam || cityParam,
         city: cityParam,
         state: 'US',
         country: 'USA',
-        lat: 33.4484,
-        lng: -112.0740,
+        lat: 39.5, // geographic center of contiguous US
+        lng: -98.35,
       };
     }
   } else if (latParam && lngParam) {

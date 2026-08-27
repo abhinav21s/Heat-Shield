@@ -1,4 +1,4 @@
-import { Coordinates, HeatMetrics, HeatZone, LocationInfo } from './types';
+import { HeatZone, LocationInfo } from './types';
 import { HOT_US_CITIES, generateLocalZones } from './mockHeatData';
 
 /**
@@ -60,7 +60,7 @@ export function getRegionalClimate(lat: number, lng: number) {
   };
 
   const matched = HOT_US_CITIES.find(
-    c => Math.hypot(c.lat - lat, c.lng - lng) < 0.6
+    c => Math.hypot(c.lat - lat, c.lng - lng) < 0.07
   );
   if (matched) {
     return {
@@ -72,81 +72,98 @@ export function getRegionalClimate(lat: number, lng: number) {
     };
   }
 
-  // Northern Plains / Montana / Dakotas / Wyoming (lat >= 43, lng between -95 and -115): pristine air
+  // Use coordinate-sensitive micro-variation so two cities in the same region
+  // produce different temperatures (both lat and lng are factored in).
+  const latV = Math.sin(lat  * 0.31731) * 3.4;
+  const lngV = Math.cos(lng  * 0.17453) * 4.1;
+  const crossV = Math.sin((lat + lng) * 0.22689) * 2.2;
+  const microDelta = latV + lngV + crossV;
+
+  // Pacific Coast (CA/OR/WA): lat 32-49, lng -115 to -125
+  if (lng <= -115 && lng >= -125 && lat >= 32 && lat <= 49) {
+    return {
+      baseTempF: Math.round((74 + (34 - lat) * 0.9 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(85, Math.max(45, Math.round(62 + latV))),
+      treeCanopyAverage: 28,
+      uhiIntensity: '+5.5°F coastal basin UHI delta',
+      baseAqi: Math.round(55 + Math.abs(lngV) * 3),
+    };
+  }
+
+  // Northern Plains / Mountain West: lat >= 43, lng -95 to -115
   if (lat >= 43 && lng <= -95 && lng >= -115) {
     return {
-      baseTempF: 81.5 + (Math.sin(lat * 3) * 2),
-      baseHumidity: 42,
+      baseTempF: Math.round((81.5 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(65, Math.max(28, Math.round(42 + latV))),
       treeCanopyAverage: 26,
       uhiIntensity: '+3.5°F open terrain delta',
-      baseAqi: 28, // Clean Good AQI
+      baseAqi: Math.round(28 + Math.abs(lngV) * 2),
     };
   }
 
-  // East Coast / Manhattan / NYC: lat ~ 38-42, lng ~ -70 to -80
+  // Northeast / East Coast: lat >= 38, lng > -80
   if (lng > -80 && lat >= 38) {
     return {
-      baseTempF: 88.5 + (Math.sin(lat * 5) * 1.8),
-      baseHumidity: 58,
+      baseTempF: Math.round((88.5 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(80, Math.max(44, Math.round(58 + latV))),
       treeCanopyAverage: 22,
       uhiIntensity: '+7.8°F urban canyon heat retention',
-      baseAqi: 62, // Moderate urban AQI
+      baseAqi: Math.round(62 + Math.abs(microDelta) * 1.5),
     };
   }
 
-  // Midwest / Indiana / Chicago: lat ~ 38-43, lng ~ -80 to -92
-  if (lng <= -80 && lng > -92 && lat >= 37) {
+  // Midwest / Ohio Valley: lat 37-43, lng -80 to -95
+  if (lng <= -80 && lng > -95 && lat >= 37) {
     return {
-      baseTempF: 86.4 + (Math.sin(lat * 4) * 2.2),
-      baseHumidity: 64,
+      baseTempF: Math.round((86.4 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(78, Math.max(46, Math.round(64 + latV))),
       treeCanopyAverage: 24,
       uhiIntensity: '+6.2°F metropolitan corridor delta',
-      baseAqi: 54, // Moderate Midwest AQI
+      baseAqi: Math.round(54 + Math.abs(lngV) * 2),
     };
   }
 
   // Southeast / Florida / Deep South: lat < 34, lng > -90
   if (lat < 34 && lng > -90) {
     return {
-      baseTempF: 94.2 + (Math.cos(lng * 3) * 2),
-      baseHumidity: 74,
+      baseTempF: Math.round((94.2 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(88, Math.max(60, Math.round(74 + latV))),
       treeCanopyAverage: 28,
       uhiIntensity: '+5.5°F high-humidity thermal index',
-      baseAqi: 46,
+      baseAqi: Math.round(46 + Math.abs(microDelta)),
     };
   }
 
-  // Southwest Desert (NV, AZ, inland CA): lat 31-38, lng -110 to -120
-  if (lat <= 38 && lng <= -108 && lng >= -120) {
+  // Southwest Desert (NV, AZ, inland CA): lat 31-38, lng -104 to -120
+  if (lat <= 38 && lng <= -104 && lng >= -120) {
     return {
-      baseTempF: 107.5 + (Math.sin(lat * 3) * 3),
-      baseHumidity: 16,
+      baseTempF: Math.round((107.5 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(30, Math.max(10, Math.round(16 + Math.abs(latV)))),
       treeCanopyAverage: 9,
       uhiIntensity: '+8.2°F asphalt radiation delta',
-      baseAqi: 80,
+      baseAqi: Math.round(80 + Math.abs(lngV) * 2),
     };
   }
 
   // Texas / Central Plains: lat 26-37, lng -93 to -105
   if (lat <= 37 && lng <= -93 && lng > -105) {
     return {
-      baseTempF: 99.4 + (Math.sin(lat * 3) * 2),
-      baseHumidity: 48,
+      baseTempF: Math.round((99.4 + microDelta) * 10) / 10,
+      baseHumidity: Math.min(68, Math.max(32, Math.round(48 + latV))),
       treeCanopyAverage: 18,
       uhiIntensity: '+7.1°F suburban freeway grid',
-      baseAqi: 68,
+      baseAqi: Math.round(68 + Math.abs(lngV) * 1.5),
     };
   }
 
-  // Default continental US interpolation based on latitude
+  // Default continental US — coordinate-sensitive interpolation
   const latFactor = Math.max(0, Math.min(1, (48 - lat) / 22));
-  const temp = 80 + (latFactor * 24);
   return {
-    baseTempF: Math.round(temp * 10) / 10,
-    baseHumidity: 50,
+    baseTempF: Math.round((80 + latFactor * 24 + microDelta) * 10) / 10,
+    baseHumidity: Math.min(75, Math.max(25, Math.round(50 + latV))),
     treeCanopyAverage: 20,
     uhiIntensity: '+6.0°F urban core delta',
-    baseAqi: Math.round(35 + (latFactor * 25)),
+    baseAqi: Math.round(35 + latFactor * 25 + Math.abs(lngV)),
   };
 }
 
