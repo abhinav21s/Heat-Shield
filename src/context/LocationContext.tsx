@@ -21,6 +21,8 @@ interface LocationContextType {
   refreshData: () => Promise<void>;
   selectedZoneId: string | null;
   setSelectedZoneId: (zoneId: string | null) => void;
+  activeRouteCcId: string | null;
+  setActiveRouteCcId: (ccId: string | null) => void;
 }
 
 const LocationContext = createContext<LocationContextType | undefined>(undefined);
@@ -33,10 +35,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [activeRouteCcId, setActiveRouteCcId] = useState<string | null>(null);
 
   const fetchHeatData = useCallback(async (params: { lat?: number; lng?: number; city?: string; label?: string }) => {
     setIsLoading(true);
     setError(null);
+    setActiveRouteCcId(null);
     try {
       let url = '/api/heat-data';
       const searchParams = new URLSearchParams();
@@ -179,6 +183,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         refreshData,
         selectedZoneId,
         setSelectedZoneId,
+        activeRouteCcId,
+        setActiveRouteCcId,
       }}
     >
       {children}

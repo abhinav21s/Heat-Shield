@@ -1,11 +1,12 @@
 'use client';
 
 import React from 'react';
-import { X, Flame, Trees, Building, ShieldCheck, MapPin, Phone, Clock, ExternalLink } from 'lucide-react';
+import { X, Flame, Trees, Building, ShieldCheck, MapPin, Phone, Clock, ExternalLink, Navigation } from 'lucide-react';
 import { HeatZone, CoolingCenter } from '@/lib/types';
 import { formatTemp, getRiskBadgeClasses, getRiskLabel } from '@/lib/utils';
 import { Badge, RiskBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { useLocation } from '@/context/LocationContext';
 
 interface ZoneDetailSheetProps {
   zone: HeatZone | null;
@@ -15,6 +16,7 @@ interface ZoneDetailSheetProps {
 }
 
 export function ZoneDetailSheet({ zone, nearestCoolingCenter, tempUnit, onClose }: ZoneDetailSheetProps) {
+  const { activeRouteCcId, setActiveRouteCcId } = useLocation();
   if (!zone) return null;
 
   const badgeStyles = getRiskBadgeClasses(zone.riskLevel);
@@ -122,6 +124,26 @@ export function ZoneDetailSheet({ zone, nearestCoolingCenter, tempUnit, onClose 
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3 text-brand" /> {nearestCoolingCenter.hours}
               </span>
+            </div>
+
+            <div className="pt-2">
+              <Button
+                variant={activeRouteCcId === nearestCoolingCenter.id ? 'secondary' : 'primary'}
+                size="sm"
+                className="w-full text-xs font-bold py-1.5 flex items-center justify-center gap-2"
+                onClick={() => {
+                  if (activeRouteCcId === nearestCoolingCenter.id) {
+                    setActiveRouteCcId(null);
+                  } else {
+                    setActiveRouteCcId(nearestCoolingCenter.id);
+                  }
+                }}
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                <span>
+                  {activeRouteCcId === nearestCoolingCenter.id ? 'Cancel Routing' : 'Plan Cool Route'}
+                </span>
+              </Button>
             </div>
           </div>
         )}
