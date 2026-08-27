@@ -20,9 +20,22 @@ export function HeatMap() {
     coolPoints: [number, number][];
   } | null>(null);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const [L, setL] = useState<any>(null);
+  const [optimisticLocation, setOptimisticLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Clear optimistic location once the report coordinates catch up to it
+  useEffect(() => {
+    if (report && optimisticLocation) {
+      const latDiff = Math.abs(report.location.lat - optimisticLocation.lat);
+      const lngDiff = Math.abs(report.location.lng - optimisticLocation.lng);
+      if (latDiff < 0.0001 && lngDiff < 0.0001) {
+        setOptimisticLocation(null);
+      }
+    }
+  }, [report, optimisticLocation]);
 
   const selectedZone = report?.zones.find(z => z.id === selectedZoneId) || null;
-  const nearestCoolingCenter = report?.coolingCenters[0];
+  const nearestCoolingCenter = report?.coolingCenters[0] || null;
 
   // Async Routing calculation using TomTom Routing API
   useEffect(() => {
@@ -142,258 +155,271 @@ export function HeatMap() {
     fetchRoutes();
   }, [activeRouteCcId, report]);
 
+  // 1. Dynamic import Leaflet exactly once on client mount
   useEffect(() => {
-    if (typeof window === 'undefined' || !mapContainerRef.current) return;
-
-    let isMounted = true;
-
-    // Dynamically import Leaflet to avoid SSR window errors
-    import('leaflet').then((L) => {
-      if (!isMounted || !mapContainerRef.current) return;
-
-      // Fix default Leaflet icon paths
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
+    if (typeof window === 'undefined') return;
+    import('leaflet').then((module) => {
+      delete (module.Icon.Default.prototype as any)._getIconUrl;
+      module.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
         iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       });
+      setL(module);
+    });
+  }, []);
 
-      if (!mapInstanceRef.current) {
-        const centerLat = report?.location.lat || 33.4484;
-        const centerLng = report?.location.lng || -112.0740;
+  // 2. Initialize map instance exactly once
+  useEffect(() => {
+    if (!L || !mapContainerRef.current || mapInstanceRef.current) return;
 
-        const map = L.map(mapContainerRef.current, {
-          center: [centerLat, centerLng],
-          zoom: 13,
-          zoomControl: false,
-        });
+    const initialLat = report?.location.lat || 33.4484;
+    const initialLng = report?.location.lng || -112.0740;
 
-        L.control.zoom({ position: 'topright' }).addTo(map);
+    const map = L.map(mapContainerRef.current, {
+      center: [initialLat, initialLng],
+      zoom: 13,
+      zoomControl: false,
+    });
 
-        // TomTom Map Display API integration
-        const tomtomKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY || process.env.TOMTOM_API_KEY;
-        const tomtomTileUrl = tomtomKey
-          ? `https://{s}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=${tomtomKey}&view=Unified`
-          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    L.control.zoom({ position: 'topright' }).addTo(map);
 
-        const tomtomAttribution = tomtomKey
-          ? '&copy; <a href="https://www.tomtom.com" target="_blank" rel="noopener noreferrer">TomTom</a>'
-          : '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>';
+    const tomtomKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY || process.env.TOMTOM_API_KEY;
+    const tomtomTileUrl = tomtomKey
+      ? `https://{s}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=${tomtomKey}&view=Unified`
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-        L.tileLayer(tomtomTileUrl, {
-          attribution: tomtomAttribution,
-          subdomains: ['a', 'b', 'c', 'd'],
-          maxZoom: 19,
-          tileSize: 256,
-        }).addTo(map);
+    const tomtomAttribution = tomtomKey
+      ? '&copy; <a href="https://www.tomtom.com" target="_blank" rel="noopener noreferrer">TomTom</a>'
+      : '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>';
 
-        const layerGroup = L.layerGroup().addTo(map);
-        layerGroupRef.current = layerGroup;
-        mapInstanceRef.current = map;
+    L.tileLayer(tomtomTileUrl, {
+      attribution: tomtomAttribution,
+      subdomains: ['a', 'b', 'c', 'd'],
+      maxZoom: 19,
+      tileSize: 256,
+    }).addTo(map);
 
-        // Click map event for pin dropping
-        map.on('click', (e: any) => {
-          const { lat, lng } = e.latlng;
-          setLocationByCoordinates(lat, lng);
-        });
-      }
+    const layerGroup = L.layerGroup().addTo(map);
+    layerGroupRef.current = layerGroup;
+    mapInstanceRef.current = map;
 
-      // Re-render markers and zones when report or filter changes
-      if (mapInstanceRef.current && layerGroupRef.current && report) {
-        const map = mapInstanceRef.current;
-        const lg = layerGroupRef.current;
-        lg.clearLayers();
-
-        map.setView([report.location.lat, report.location.lng], 13);
-
-        // User Pin Marker
-        const userIcon = L.divIcon({
-          className: 'custom-user-marker',
-          html: `
-            <div class="relative flex items-center justify-center">
-              <div class="absolute w-8 h-8 rounded-full bg-[#E07A5F]/40 animate-ping"></div>
-              <div class="w-7 h-7 rounded-full bg-[#E07A5F] border-2 border-white text-white flex items-center justify-center shadow-lg">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-                  <circle cx="12" cy="9" r="2.5" fill="currentColor"/>
-                </svg>
-              </div>
-            </div>
-          `,
-          iconSize: [28, 28],
-          iconAnchor: [14, 28],
-        });
-
-        L.marker([report.location.lat, report.location.lng], { icon: userIcon, zIndexOffset: 1000 })
-          .addTo(lg)
-          .bindPopup(`
-            <div style="font-family: sans-serif; padding: 4px; text-align: center;">
-              <strong style="color: #2D2A26; font-size: 13px;">Your Selected Location</strong><br/>
-              <span style="color: #E07A5F; font-weight: bold; font-size: 14px;">${formatTemp(report.metrics.temperatureF, tempUnit)}</span><br/>
-              <span style="color: #6B6560; font-size: 11px;">Risk: ${report.analysis.riskLevel.toUpperCase()}</span>
-            </div>
-          `);
-
-        // Heat Zones
-        if (filterMode !== 'cooling') {
-          report.zones.forEach((zone: HeatZone) => {
-            if (filterMode === 'high-extreme' && (zone.riskLevel === 'low' || zone.riskLevel === 'moderate')) {
-              return;
-            }
-
-            const colorMap: Record<RiskLevel, string> = {
-              low: '#81B29A',
-              moderate: '#F2CC8F',
-              high: '#E07A5F',
-              extreme: '#D62828',
-            };
-
-            const color = colorMap[zone.riskLevel];
-
-            // Heat Zone Circle
-            const circle = L.circle([zone.lat, zone.lng], {
-              color: color,
-              weight: 2,
-              fillColor: color,
-              fillOpacity: zone.riskLevel === 'extreme' ? 0.45 : zone.riskLevel === 'high' ? 0.35 : 0.25,
-              radius: zone.radiusMeters,
-            }).addTo(lg);
-
-            // Interactive Click on Zone
-            circle.on('click', (e: any) => {
-              L.DomEvent.stopPropagation(e);
-              setSelectedZoneId(zone.id);
-            });
-
-            // Zone Tag / Pill Marker
-            const tagIcon = L.divIcon({
-              className: 'zone-pill-marker',
-              html: `
-                <div class="px-2.5 py-1 rounded-full text-xs font-black shadow-md border cursor-pointer whitespace-nowrap transition-transform hover:scale-105 flex items-center gap-1.5"
-                     style="background-color: white; border-color: ${color}; color: ${color};">
-                  <span class="w-2 h-2 rounded-full" style="background-color: ${color};"></span>
-                  <span>${formatTemp(zone.tempF, tempUnit)}</span>
-                </div>
-              `,
-              iconSize: [60, 24],
-              iconAnchor: [30, 12],
-            });
-
-            const marker = L.marker([zone.lat, zone.lng], { icon: tagIcon }).addTo(lg);
-            marker.on('click', (e: any) => {
-              L.DomEvent.stopPropagation(e);
-              setSelectedZoneId(zone.id);
-            });
-          });
-        }
-
-        // Cooling Centers Markers
-        if (filterMode === 'all' || filterMode === 'cooling') {
-          report.coolingCenters.forEach((cc: CoolingCenter) => {
-            const ccIcon = L.divIcon({
-              className: 'cooling-marker',
-              html: `
-                <div class="w-8 h-8 rounded-2xl bg-[#81B29A] border-2 border-white text-white flex items-center justify-center shadow-md cursor-pointer hover:scale-110 transition-transform"
-                     title="${cc.name}">
-                  <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m-9-9h18M6 6l12 12M6 18L18 6"/>
-                  </svg>
-                </div>
-              `,
-              iconSize: [32, 32],
-              iconAnchor: [16, 16],
-            });
-
-            const marker = L.marker([cc.lat, cc.lng], { icon: ccIcon }).addTo(lg);
-
-            // Programmatically construct Leaflet popup content with a routing button
-            const popupContainer = document.createElement('div');
-            popupContainer.style.fontFamily = 'sans-serif';
-            popupContainer.style.padding = '4px';
-            popupContainer.style.minWidth = '200px';
-
-            popupContainer.innerHTML = `
-              <strong style="color: #2C5242; font-size: 13px; display: block; margin-bottom: 2px;">❄️ ${cc.name}</strong>
-              <span style="color: #6B6560; font-size: 11px; display: block; margin-bottom: 2px;">${cc.address}</span>
-              <span style="color: #2D2A26; font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px;">${cc.hours}</span>
-              <div style="font-size: 10px; color: #81B29A; font-weight: bold; margin-bottom: 8px;">Status: ${cc.capacityStatus}</div>
-            `;
-
-            const planRouteBtn = document.createElement('button');
-            planRouteBtn.className = 'w-full px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer';
-            
-            const isCurrentlyRouting = activeRouteCcId === cc.id;
-            if (isCurrentlyRouting) {
-              planRouteBtn.className += ' bg-stone-200 hover:bg-stone-300 text-stone-800';
-              planRouteBtn.style.backgroundColor = '#E2E8F0';
-              planRouteBtn.style.color = '#334155';
-              planRouteBtn.textContent = 'Cancel Routing';
-              planRouteBtn.onclick = (e) => {
-                e.stopPropagation();
-                setActiveRouteCcId(null);
-                marker.closePopup();
-              };
-            } else {
-              planRouteBtn.className += ' text-white';
-              planRouteBtn.style.backgroundColor = '#E07A5F';
-              planRouteBtn.style.color = '#FFFFFF';
-              planRouteBtn.textContent = 'Plan Cool Route';
-              planRouteBtn.onclick = (e) => {
-                e.stopPropagation();
-                setActiveRouteCcId(cc.id);
-                marker.closePopup();
-              };
-            }
-
-            popupContainer.appendChild(planRouteBtn);
-            marker.bindPopup(popupContainer);
-          });
-        }
-
-        // Draw active routes if a cooling center is selected for routing and routesData is loaded
-        if (activeRouteCcId && routesData) {
-          const activeCc = report.coolingCenters.find(cc => cc.id === activeRouteCcId);
-          if (activeCc && routesData.stdPoints.length > 0 && routesData.coolPoints.length > 0) {
-            // Draw Standard Route polyline (Red/Orange)
-            const stdPolyline = L.polyline(routesData.stdPoints, {
-              color: '#D62828',
-              weight: 4,
-              opacity: 0.75,
-              dashArray: '5, 8',
-            }).addTo(lg);
-            
-            stdPolyline.bindTooltip("Standard Route (Concrete Heat)", {
-              permanent: true,
-              direction: 'top',
-              className: 'route-tooltip std-route-tooltip'
-            });
-            
-            // Draw Cool Route polyline (Emerald Green)
-            const coolPolyline = L.polyline(routesData.coolPoints, {
-              color: '#2E7D32',
-              weight: 6,
-              opacity: 0.9,
-            }).addTo(lg);
-            
-            coolPolyline.bindTooltip("❄&nbsp;Canopy Cool Corridor", {
-              permanent: true,
-              direction: 'bottom',
-              className: 'route-tooltip cool-route-tooltip'
-            });
-            
-            // Fit bounds to the actual polyline paths dynamically so it frames the routes perfectly
-            const combinedBounds = coolPolyline.getBounds().extend(stdPolyline.getBounds());
-            map.fitBounds(combinedBounds, { maxZoom: 15, padding: [60, 60] });
-          }
-        }
-      }
+    map.on('click', (e: any) => {
+      const { lat, lng } = e.latlng;
+      setOptimisticLocation({ lat, lng });
+      setLocationByCoordinates(lat, lng);
+      setSelectedZoneId('pinned-location');
     });
 
     return () => {
-      isMounted = false;
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
     };
-  }, [report, tempUnit, filterMode, setLocationByCoordinates, setSelectedZoneId, activeRouteCcId, routesData]);
+  }, [L]);
+
+  // 3. Update markers and routes synchronously on data change
+  useEffect(() => {
+    if (!L || !mapInstanceRef.current || !layerGroupRef.current || !report) return;
+
+    const map = mapInstanceRef.current;
+    const lg = layerGroupRef.current;
+
+    const activeLat = optimisticLocation?.lat ?? report.location.lat;
+    const activeLng = optimisticLocation?.lng ?? report.location.lng;
+
+    // Pan smoothly. Retain user's current manual zoom level if they clicked the map,
+    // otherwise reset to 13 if they changed to a new preset city.
+    const targetZoom = report.location.isUserLocation ? map.getZoom() : 13;
+    map.setView([activeLat, activeLng], targetZoom);
+
+    lg.clearLayers();
+
+    // User Pin Marker
+    const userIcon = L.divIcon({
+      className: 'custom-user-marker',
+      html: `
+        <div class="relative flex items-center justify-center">
+          <div class="absolute w-8 h-8 rounded-full bg-[#E07A5F]/40 animate-ping"></div>
+          <div class="w-7 h-7 rounded-full bg-[#E07A5F] border-2 border-white text-white flex items-center justify-center shadow-lg">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+              <circle cx="12" cy="9" r="2.5" fill="currentColor"/>
+            </svg>
+          </div>
+        </div>
+      `,
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+    });
+
+    L.marker([activeLat, activeLng], { icon: userIcon, zIndexOffset: 1000 })
+      .addTo(lg)
+      .bindPopup(`
+        <div style="font-family: sans-serif; padding: 4px; text-align: center;">
+          <strong style="color: #2D2A26; font-size: 13px;">Your Selected Location</strong><br/>
+          <span style="color: #E07A5F; font-weight: bold; font-size: 14px;">${formatTemp(report.metrics.temperatureF, tempUnit)}</span><br/>
+          <span style="color: #6B6560; font-size: 11px;">Risk: ${report.analysis.riskLevel.toUpperCase()}</span>
+        </div>
+      `);
+
+    // Heat Zones
+    if (filterMode !== 'cooling') {
+      report.zones.forEach((zone: HeatZone) => {
+        // Skip user pinned location zone from circular markers since it's already shown by user pin
+        if (zone.id === 'pinned-location') return;
+
+        if (filterMode === 'high-extreme' && (zone.riskLevel === 'low' || zone.riskLevel === 'moderate')) {
+          return;
+        }
+
+        const colorMap: Record<RiskLevel, string> = {
+          low: '#81B29A',
+          moderate: '#F2CC8F',
+          high: '#E07A5F',
+          extreme: '#D62828',
+        };
+
+        const color = colorMap[zone.riskLevel];
+
+        // Heat Zone Circle
+        const circle = L.circle([zone.lat, zone.lng], {
+          color: color,
+          weight: 2,
+          fillColor: color,
+          fillOpacity: zone.riskLevel === 'extreme' ? 0.45 : zone.riskLevel === 'high' ? 0.35 : 0.25,
+          radius: zone.radiusMeters,
+        }).addTo(lg);
+
+        // Interactive Click on Zone
+        circle.on('click', (e: any) => {
+          L.DomEvent.stopPropagation(e);
+          setSelectedZoneId(zone.id);
+        });
+
+        // Zone Tag / Pill Marker
+        const tagIcon = L.divIcon({
+          className: 'zone-pill-marker',
+          html: `
+            <div class="px-2.5 py-1 rounded-full text-xs font-black shadow-md border cursor-pointer whitespace-nowrap transition-transform hover:scale-105 flex items-center gap-1.5"
+                 style="background-color: white; border-color: ${color}; color: ${color};">
+              <span class="w-2 h-2 rounded-full" style="background-color: ${color};"></span>
+              <span>${formatTemp(zone.tempF, tempUnit)}</span>
+            </div>
+          `,
+          iconSize: [60, 24],
+          iconAnchor: [30, 12],
+        });
+
+        const marker = L.marker([zone.lat, zone.lng], { icon: tagIcon }).addTo(lg);
+        marker.on('click', (e: any) => {
+          L.DomEvent.stopPropagation(e);
+          setSelectedZoneId(zone.id);
+        });
+      });
+    }
+
+    // Cooling Centers Markers
+    if (filterMode === 'all' || filterMode === 'cooling') {
+      report.coolingCenters.forEach((cc: CoolingCenter) => {
+        const ccIcon = L.divIcon({
+          className: 'cooling-marker',
+          html: `
+            <div class="w-8 h-8 rounded-2xl bg-[#81B29A] border-2 border-white text-white flex items-center justify-center shadow-md cursor-pointer hover:scale-110 transition-transform"
+                 title="${cc.name}">
+              <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m-9-9h18M6 6l12 12M6 18L18 6"/>
+              </svg>
+            </div>
+          `,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+
+        const marker = L.marker([cc.lat, cc.lng], { icon: ccIcon }).addTo(lg);
+
+        // Programmatically construct Leaflet popup content with a routing button
+        const popupContainer = document.createElement('div');
+        popupContainer.style.fontFamily = 'sans-serif';
+        popupContainer.style.padding = '4px';
+        popupContainer.style.minWidth = '200px';
+
+        popupContainer.innerHTML = `
+          <strong style="color: #2C5242; font-size: 13px; display: block; margin-bottom: 2px;">❄️ ${cc.name}</strong>
+          <span style="color: #6B6560; font-size: 11px; display: block; margin-bottom: 2px;">${cc.address}</span>
+          <span style="color: #2D2A26; font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px;">${cc.hours}</span>
+          <div style="font-size: 10px; color: #81B29A; font-weight: bold; margin-bottom: 8px;">Status: ${cc.capacityStatus}</div>
+        `;
+
+        const planRouteBtn = document.createElement('button');
+        planRouteBtn.className = 'w-full px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer';
+        
+        const isCurrentlyRouting = activeRouteCcId === cc.id;
+        if (isCurrentlyRouting) {
+          planRouteBtn.className += ' bg-stone-200 hover:bg-stone-300 text-stone-800';
+          planRouteBtn.style.backgroundColor = '#E2E8F0';
+          planRouteBtn.style.color = '#334155';
+          planRouteBtn.textContent = 'Cancel Routing';
+          planRouteBtn.onclick = (e) => {
+            e.stopPropagation();
+            setActiveRouteCcId(null);
+            marker.closePopup();
+          };
+        } else {
+          planRouteBtn.className += ' text-white';
+          planRouteBtn.style.backgroundColor = '#E07A5F';
+          planRouteBtn.style.color = '#FFFFFF';
+          planRouteBtn.textContent = 'Plan Cool Route';
+          planRouteBtn.onclick = (e) => {
+            e.stopPropagation();
+            setActiveRouteCcId(cc.id);
+            marker.closePopup();
+          };
+        }
+
+        popupContainer.appendChild(planRouteBtn);
+        marker.bindPopup(popupContainer);
+      });
+    }
+
+    // Draw active routes if a cooling center is selected for routing and routesData is loaded
+    if (activeRouteCcId && routesData) {
+      const activeCc = report.coolingCenters.find(cc => cc.id === activeRouteCcId);
+      if (activeCc && routesData.stdPoints.length > 0 && routesData.coolPoints.length > 0) {
+        // Draw Standard Route polyline (Red/Orange)
+        const stdPolyline = L.polyline(routesData.stdPoints, {
+          color: '#D62828',
+          weight: 4,
+          opacity: 0.75,
+          dashArray: '5, 8',
+        }).addTo(lg);
+        
+        stdPolyline.bindTooltip("Standard Route (Concrete Heat)", {
+          permanent: true,
+          direction: 'top',
+          className: 'route-tooltip std-route-tooltip'
+        });
+        
+        // Draw Cool Route polyline (Emerald Green)
+        const coolPolyline = L.polyline(routesData.coolPoints, {
+          color: '#2E7D32',
+          weight: 6,
+          opacity: 0.9,
+        }).addTo(lg);
+        
+        coolPolyline.bindTooltip("❄&nbsp;Canopy Cool Corridor", {
+          permanent: true,
+          direction: 'bottom',
+          className: 'route-tooltip cool-route-tooltip'
+        });
+        
+        // Fit bounds to the actual polyline paths dynamically so it frames the routes perfectly
+        const combinedBounds = coolPolyline.getBounds().extend(stdPolyline.getBounds());
+        map.fitBounds(combinedBounds, { maxZoom: 15, padding: [60, 60] });
+      }
+    }
+  }, [L, report, tempUnit, filterMode, activeRouteCcId, routesData, setLocationByCoordinates, setSelectedZoneId, optimisticLocation]);
 
   return (
     <div className="relative w-full h-full min-h-[600px] rounded-3xl overflow-hidden border border-brand-border shadow-card bg-brand-surface">

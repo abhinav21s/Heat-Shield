@@ -56,6 +56,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           searchParams.append('label', params.label);
         }
       }
+      searchParams.append('_t', Date.now().toString());
       const qs = searchParams.toString();
       if (qs) {
         url += `?${qs}`;
