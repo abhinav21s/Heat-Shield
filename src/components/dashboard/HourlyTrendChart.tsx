@@ -16,6 +16,10 @@ export function HourlyTrendChart({ forecast, tempUnit }: HourlyTrendChartProps) 
   const minTemp = Math.min(...forecast.map((f) => f.tempF));
   const tempRange = Math.max(1, maxTemp - minTemp + 5);
 
+  // Find actual peak hour from the data
+  const peakItem = forecast.reduce((a, b) => a.tempF > b.tempF ? a : b);
+  const peakLabel = peakItem.timeFormatted;
+
   return (
     <Card className="bg-gradient-to-b from-[#F8EDE6] to-white/95">
       <CardHeader className="pb-3 border-b border-brand-border/60 flex flex-row items-center justify-between">
@@ -29,7 +33,7 @@ export function HourlyTrendChart({ forecast, tempUnit }: HourlyTrendChartProps) 
           </div>
         </div>
         <span className="text-xs font-bold text-brand-dark px-2.5 py-1 rounded-full bg-brand/10">
-          Peak at 3:00 PM
+          Peak at {peakLabel}
         </span>
       </CardHeader>
 

@@ -59,7 +59,7 @@ export function SmartInsightsGrid({ report }: SmartInsightsGridProps) {
                 <TrendingUp className="w-5 h-5" />
               </span>
               <span className="text-xs font-extrabold px-2.5 py-1 rounded-full bg-[#D62828]/15 text-[#B21E1E]">
-                {analysis.trend.toUpperCase()} (+{analysis.trendDelta}°F)
+                {analysis.trend.toUpperCase()} ({analysis.trendDelta >= 0 ? '+' : ''}{analysis.trendDelta}°F)
               </span>
             </div>
             <div>
