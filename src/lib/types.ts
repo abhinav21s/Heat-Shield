@@ -30,6 +30,13 @@ export interface HeatMetrics {
   solarRadiation: number; // W/m²
   windSpeedMph: number;
   airQualityAqi: number;
+  elevationMeters?: number;
+  co2Ppm?: number;
+  methanePpb?: number;
+  cloudCoverOctas?: number;
+  pm25Index?: number;
+  pm10Index?: number;
+  no2Index?: number;
 }
 
 export interface VulnerableGroupRisk {
@@ -71,7 +78,7 @@ export interface HeatRiskAnalysis {
 export interface CoolingCenter {
   id: string;
   name: string;
-  type: 'Public Library' | 'Community Center' | 'Emergency Cooling Shelter' | 'Misting Station' | 'Splash Pad' | 'Senior Center';
+  type: 'Public Library' | 'Community Center' | 'Emergency Cooling Shelter' | 'Misting Station' | 'Splash Pad' | 'Senior Center' | 'Park or Garden' | 'Shopping Mall';
   address: string;
   lat: number;
   lng: number;
@@ -101,6 +108,13 @@ export interface HeatZone {
   imperviousSurface: number; // %
   coolingRecommendation: string;
   whyRiskyOrCool: string;
+  elevationMeters?: number;
+  co2Ppm?: number;
+  methanePpb?: number;
+  cloudCoverOctas?: number;
+  pm25Index?: number;
+  pm10Index?: number;
+  no2Index?: number;
 }
 
 export interface HeatReportData {

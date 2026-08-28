@@ -32,7 +32,12 @@ export function CoolingCentersList({ coolingCenters }: CoolingCentersListProps) 
 
       <CardContent className="pt-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {coolingCenters.map((center) => (
+          {coolingCenters.length === 0 ? (
+            <div className="col-span-2 py-8 text-center text-xs font-semibold text-ink-secondary">
+              No designated municipal cooling shelters found in this grid sector.
+            </div>
+          ) : (
+            coolingCenters.map((center) => (
             <div
               key={center.id}
               className="p-4 rounded-2xl bg-white border border-brand-border hover:border-brand/40 transition-all space-y-3 shadow-sm"
@@ -75,7 +80,7 @@ export function CoolingCentersList({ coolingCenters }: CoolingCentersListProps) 
                 ))}
               </div>
             </div>
-          ))}
+          )))}
         </div>
       </CardContent>
     </Card>
