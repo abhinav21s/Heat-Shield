@@ -156,7 +156,9 @@ export function getRegionalClimate(lat: number, lng: number) {
  */
 export async function fetchFortyGuardData(lat: number, lng: number): Promise<FortyGuardApiResponse> {
   const apiKey = process.env.FORTYGUARD_API_KEY;
-  const cacheKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  // Cache key at 2-decimal precision (~1.1km grid) — regional temp doesn't change within this radius.
+  // Zone-level variation is handled by coordinate-seeded offsets in generateLocalZones.
+  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
 
   // Return cached result immediately (0ms)
   const cached = fortyguardCache.get(cacheKey);

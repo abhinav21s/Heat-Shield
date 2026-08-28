@@ -119,9 +119,17 @@ export const HOT_US_CITIES: PredefinedCity[] = [
 ];
 
 /**
- * Creates realistic micro-zones around a focal coordinate for heat map rendering
+ * Creates realistic micro-zones around a focal coordinate for heat map rendering.
+ * Uses coordinate-seeded variation so zone temperatures update whenever the pinned
+ * location changes, not just when the broad regional baseTempF changes.
  */
 export function generateLocalZones(centerLat: number, centerLng: number, baseTempF: number, cityName: string): HeatZone[] {
+  // Deterministic but coordinate-sensitive variation (±3°F) so clicking a new spot
+  // always produces visibly different zone temperatures.
+  const coordSeed = Math.sin(centerLat * 127.1 + centerLng * 311.7) * 3.0;
+  const coordSeed2 = Math.cos(centerLat * 83.3 - centerLng * 197.5) * 1.8;
+  const effectiveBase = baseTempF + coordSeed + coordSeed2;
+
   const zoneOffsets = [
     {
       name: `${cityName} Industrial & Logistics Corridor`,
@@ -210,7 +218,8 @@ export function generateLocalZones(centerLat: number, centerLng: number, baseTem
   ];
 
   return zoneOffsets.map((z, idx) => {
-    const tempF = Math.round((baseTempF + z.tempOffset) * 10) / 10;
+    // Use effectiveBase (coordinate-seeded) so zone temps change when the pin moves
+    const tempF = Math.round((effectiveBase + z.tempOffset) * 10) / 10;
     const tempC = Math.round(((tempF - 32) * 5) / 9 * 10) / 10;
     const surfaceTempF = Math.round((tempF + z.asphaltOffset) * 10) / 10;
     const surfaceTempC = Math.round(((surfaceTempF - 32) * 5) / 9 * 10) / 10;

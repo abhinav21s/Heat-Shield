@@ -21,6 +21,8 @@ interface LocationContextType {
   refreshData: () => Promise<void>;
   selectedZoneId: string | null;
   setSelectedZoneId: (zoneId: string | null) => void;
+  activeRouteCcId: string | null;
+  setActiveRouteCcId: (ccId: string | null) => void;
 }
 
 const LocationContext = createContext<LocationContextType | undefined>(undefined);
@@ -33,10 +35,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [activeRouteCcId, setActiveRouteCcId] = useState<string | null>(null);
 
   const fetchHeatData = useCallback(async (params: { lat?: number; lng?: number; city?: string; label?: string }) => {
     setIsLoading(true);
     setError(null);
+    setActiveRouteCcId(null);
     try {
       let url = '/api/heat-data';
       const searchParams = new URLSearchParams();
@@ -52,6 +56,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           searchParams.append('label', params.label);
         }
       }
+      // Cache-bust so every new location pin always gets fresh data
+      searchParams.append('_t', Date.now().toString());
       const qs = searchParams.toString();
       if (qs) {
         url += `?${qs}`;
@@ -71,13 +77,19 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       console.error('Heat data fetch error:', err);
       // Fallback directly to local generator so the user always has a seamless experience
       const defaultCity = HOT_US_CITIES[0];
+      const fallbackLat = params.lat ?? defaultCity.lat;
+      const fallbackLng = params.lng ?? defaultCity.lng;
+      // Resolve a city name: if city param was given try to match it, otherwise use coords
+      const matchedCity = params.city
+        ? HOT_US_CITIES.find(c => c.id === params.city?.toLowerCase() || c.name.toLowerCase() === params.city?.toLowerCase())
+        : null;
       const fallbackReport = buildHeatReportForLocation({
-        name: params.label || `${defaultCity.name}, ${defaultCity.state}`,
-        city: defaultCity.name,
-        state: defaultCity.state,
-        country: defaultCity.country,
-        lat: params.lat ?? defaultCity.lat,
-        lng: params.lng ?? defaultCity.lng,
+        name: params.label || matchedCity?.name || (params.city ? params.city : `${defaultCity.name}, ${defaultCity.state}`),
+        city: matchedCity?.name || params.city || defaultCity.name,
+        state: matchedCity?.state || defaultCity.state,
+        country: matchedCity?.country || defaultCity.country,
+        lat: fallbackLat,
+        lng: fallbackLng,
       });
       setReport(fallbackReport);
       setError(null);
@@ -179,6 +191,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         refreshData,
         selectedZoneId,
         setSelectedZoneId,
+        activeRouteCcId,
+        setActiveRouteCcId,
       }}
     >
       {children}
