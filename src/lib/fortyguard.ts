@@ -185,9 +185,13 @@ export function getRegionalClimate(lat: number, lng: number) {
  */
 export async function fetchFortyGuardData(lat: number, lng: number): Promise<FortyGuardApiResponse> {
   const apiKey = process.env.FORTYGUARD_API_KEY;
-  const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  const cacheKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
 
-  // Caching completely bypassed to guarantee strictly live queries to FortyGuard API
+  // Return cached live result if recent (5 mins) for snappy performance
+  const cached = fortyguardCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.response;
+  }
 
   const climate = getRegionalClimate(lat, lng);
   const estimatedTempF = Math.round(climate.baseTempF * 10) / 10;
@@ -213,7 +217,7 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
     try {
       const endpoint = `${FORTYGUARD_BASE_URL}/v1/env_params`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -245,16 +249,16 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
         if (activityId) {
           let completed = false;
           let attempts = 0;
-          const maxAttempts = 10;
+          const maxAttempts = 3;
 
           while (!completed && attempts < maxAttempts) {
             attempts++;
-            // Short 300ms sleep for fast responsive polling
+            // Quick 300ms sleep for fast responsive polling
             await new Promise(resolve => setTimeout(resolve, 300));
 
             try {
               const statusController = new AbortController();
-              const statusTimeout = setTimeout(() => statusController.abort(), 800);
+              const statusTimeout = setTimeout(() => statusController.abort(), 1000);
 
               const statusResponse = await fetch(`${FORTYGUARD_BASE_URL}/v1/status/${activityId}`, {
                 method: 'GET',
@@ -341,12 +345,16 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
                     return resultResponse;
                   }
                 } else if (statusJson.data?.status === 'Processing') {
-                  completed = true;
-                  console.log(`FortyGuard activity ${activityId} is processing asynchronously. Failing fast to fallback.`);
-                  break;
+                  if (attempts >= maxAttempts) {
+                    completed = true;
+                    console.log(`FortyGuard activity ${activityId} still processing after max attempts. Moving to model fallback.`);
+                    break;
+                  }
+                  // Otherwise let the loop continue and poll again in next iteration
                 } else if (statusJson.data?.status === 'Failed') {
                   completed = true;
                   console.warn(`FortyGuard activity ${activityId} failed.`);
+                  break;
                 }
               }
             } catch (pollErr) {
@@ -355,8 +363,13 @@ export async function fetchFortyGuardData(lat: number, lng: number): Promise<For
           }
         }
       }
-    } catch (err) {
-      console.warn("FortyGuard API request failed, moving to high-speed model fallback:", err);
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError' || err?.message?.includes('aborted');
+      if (isAbort) {
+        console.log("FortyGuard API reached timeout window, seamlessly serving instant regional model.");
+      } else {
+        console.warn("FortyGuard API request error, fallback activated:", err?.message || err);
+      }
     }
   }
 
