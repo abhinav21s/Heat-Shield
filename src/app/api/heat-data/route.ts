@@ -5,12 +5,24 @@ import { LocationInfo } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
+const reportCache = new Map<string, { timestamp: number; data: any }>();
+const REPORT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const latParam = searchParams.get('lat');
   const lngParam = searchParams.get('lng');
   const cityParam = searchParams.get('city');
   const labelParam = searchParams.get('label') || searchParams.get('name');
+
+  const cacheKey = cityParam
+    ? `city:${cityParam.toLowerCase()}`
+    : (latParam && lngParam ? `coords:${parseFloat(latParam).toFixed(3)},${parseFloat(lngParam).toFixed(3)}` : 'default');
+
+  const cached = reportCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < REPORT_CACHE_TTL) {
+    return NextResponse.json(cached.data);
+  }
 
   const tomtomKey = process.env.TOMTOM_API_KEY || process.env.NEXT_PUBLIC_TOMTOM_API_KEY;
   let location: LocationInfo;
@@ -80,7 +92,7 @@ export async function GET(request: NextRequest) {
       if (tomtomKey) {
         try {
           const tomtomGeocodeUrl = `https://api.tomtom.com/search/2/reverseGeocode/${lat},${lng}.json?key=${tomtomKey}`;
-          const res = await fetch(tomtomGeocodeUrl, { signal: AbortSignal.timeout(1200) });
+          const res = await fetch(tomtomGeocodeUrl, { signal: AbortSignal.timeout(1000) });
           if (res.ok) {
             const json = await res.json();
             const addr = json.addresses?.[0]?.address;
@@ -93,40 +105,7 @@ export async function GET(request: NextRequest) {
             }
           }
         } catch (e) {
-          console.warn('TomTom reverse geocoding failed, falling back to OSM Nominatim:', e);
-        }
-      }
-
-      // Nominatim Fallback
-      if (!geocodedOk) {
-        try {
-          const osmUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`;
-          const res = await fetch(osmUrl, {
-            headers: {
-              'User-Agent': 'HeatShield-App/1.0',
-              'Accept': 'application/json',
-            },
-            signal: AbortSignal.timeout(1500),
-          });
-
-          if (res.ok) {
-            const json = await res.json();
-            if (json && json.address) {
-              const addr = json.address;
-              cityName = addr.city || addr.town || addr.village || addr.suburb || closestCity.name;
-              stateName = addr.state || closestCity.state;
-              neighborhood = addr.neighbourhood || addr.suburb || addr.quarter || 'Selected Coordinates';
-              
-              const parts = [];
-              if (addr.house_number) parts.push(addr.house_number);
-              if (addr.road) parts.push(addr.road);
-              if (addr.neighbourhood || addr.suburb) parts.push(addr.neighbourhood || addr.suburb);
-              
-              streetAddress = parts.join(', ') || json.display_name.split(',').slice(0, 3).join(', ');
-            }
-          }
-        } catch (e) {
-          console.warn('Nominatim reverse geocoding failed:', e);
+          // Fallback to coordinates
         }
       }
 
@@ -153,9 +132,9 @@ export async function GET(request: NextRequest) {
     };
   }
 
-  // Fetch real cooling centers from TomTom POI Search
-  let coolingCenters: any[] = [];
-  if (tomtomKey) {
+  // Fetch real cooling centers from TomTom POI Search in parallel with FortyGuard
+  const fetchCoolingCentersPromise = async () => {
+    if (!tomtomKey) return [];
     try {
       const searchTerms = [
         { term: 'shopping center', type: 'Shopping Mall' },
@@ -169,7 +148,7 @@ export async function GET(request: NextRequest) {
         try {
           const res = await fetch(
             `https://api.tomtom.com/search/2/poiSearch/${encodeURIComponent(st.term)}.json?key=${tomtomKey}&lat=${location.lat}&lon=${location.lng}&radius=8000&limit=3`,
-            { signal: AbortSignal.timeout(1200) }
+            { signal: AbortSignal.timeout(1000) }
           );
           if (res.ok) {
             const json = await res.json();
@@ -179,7 +158,7 @@ export async function GET(request: NextRequest) {
             }));
           }
         } catch (e) {
-          // ignore individual timeout/error
+          // ignore individual timeout
         }
         return [];
       });
@@ -191,23 +170,15 @@ export async function GET(request: NextRequest) {
       const uniqueResults = rawResults.filter(item => {
         if (!item.poi?.name) return false;
         const name = item.poi.name.toLowerCase().trim();
-        
-        // 1. Exclude schools, colleges, and training institutes
         const forbiddenWords = ['school', 'college', 'university', 'academy', 'institute', 'elementary', 'kindergarten'];
-        if (forbiddenWords.some(word => name.includes(word))) {
-          return false;
-        }
-
-        // 2. Filter duplicates
+        if (forbiddenWords.some(word => name.includes(word))) return false;
         if (seen.has(name)) return false;
         seen.add(name);
         return true;
       });
 
       uniqueResults.sort((a, b) => (a.dist || 0) - (b.dist || 0));
-      const topResults = uniqueResults.slice(0, 4);
-
-      coolingCenters = topResults.map((item, idx) => {
+      return uniqueResults.slice(0, 4).map((item, idx) => {
         const type = item.customType;
         const distanceMiles = Math.round((item.dist / 1609.34) * 10) / 10;
         
@@ -232,18 +203,21 @@ export async function GET(request: NextRequest) {
           distanceMiles,
           hours: type === 'Park or Garden' ? '6:00 AM – 10:00 PM (Daily)' : '9:00 AM – 8:00 PM (Mon-Sat)',
           isOpen: true,
-          capacityStatus: distanceMiles < 1.0 ? 'High Demand' : 'Available',
+          capacityStatus: (distanceMiles < 1.0 ? 'High Demand' : 'Available') as 'High Demand' | 'Available',
           amenities,
           phone: item.poi?.phone || '(555) 019-9900',
         };
       });
-    } catch (err) {
-      console.warn("Failed to fetch real cooling centers from TomTom POI Search:", err);
+    } catch {
+      return [];
     }
-  }
+  };
 
-  // Fetch FortyGuard temperature & microclimate thermal data
-  const fgResponse = await fetchFortyGuardData(location.lat, location.lng);
+  // Run FortyGuard fetch and TomTom POI search in parallel for ultra-fast performance
+  const [fgResponse, coolingCenters] = await Promise.all([
+    fetchFortyGuardData(location.lat, location.lng),
+    fetchCoolingCentersPromise()
+  ]);
   
   const report = buildHeatReportForLocation(location, {
     temperatureF: fgResponse.data.ambientTemperatureF,
@@ -268,9 +242,14 @@ export async function GET(request: NextRequest) {
     ? 'FortyGuard Hyperlocal API' 
     : 'Simulated FortyGuard Real-Time Engine';
 
-  return NextResponse.json({
+  const responsePayload = {
     success: true,
     data: report,
     fortyguard: fgResponse,
-  });
+  };
+
+  // Cache report in memory
+  reportCache.set(cacheKey, { timestamp: Date.now(), data: responsePayload });
+
+  return NextResponse.json(responsePayload);
 }
