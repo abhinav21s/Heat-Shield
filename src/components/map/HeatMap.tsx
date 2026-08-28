@@ -387,12 +387,13 @@ export function HeatMap() {
     if (activeRouteCcId && routesData) {
       const activeCc = report.coolingCenters.find(cc => cc.id === activeRouteCcId);
       if (activeCc && routesData.stdPoints.length > 0 && routesData.coolPoints.length > 0) {
-        // Draw Standard Route polyline (Red/Orange)
+        // Draw Standard Route polyline (Red Dots)
         const stdPolyline = L.polyline(routesData.stdPoints, {
           color: '#D62828',
-          weight: 4,
-          opacity: 0.75,
-          dashArray: '5, 8',
+          weight: 6,
+          opacity: 0.85,
+          dashArray: '1, 12',
+          lineCap: 'round',
         }).addTo(lg);
         
         stdPolyline.bindTooltip("Standard Route (Concrete Heat)", {
@@ -401,11 +402,11 @@ export function HeatMap() {
           className: 'route-tooltip std-route-tooltip'
         });
         
-        // Draw Cool Route polyline (Emerald Green)
+        // Draw Cool Route polyline (Solid Emerald Green Line)
         const coolPolyline = L.polyline(routesData.coolPoints, {
           color: '#2E7D32',
-          weight: 6,
-          opacity: 0.9,
+          weight: 5,
+          opacity: 0.95,
         }).addTo(lg);
         
         coolPolyline.bindTooltip("❄&nbsp;Canopy Cool Corridor", {
