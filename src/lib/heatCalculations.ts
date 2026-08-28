@@ -206,26 +206,42 @@ export function getVulnerableGroupRisks(riskLevel: RiskLevel): VulnerableGroupRi
 }
 
 /**
- * Generate 8-hour trend forecast
+ * Generate 8-hour trend forecast starting from the current hour
  */
 export function generateHourlyTrend(baseTempF: number, baseHumidity: number, currentHourOffset: number = 0): HourlyForecastItem[] {
-  const hours = ['11 AM', '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM', '6 PM', '7 PM', '8 PM'];
+  // Start from actual current hour, clamped so we always show a meaningful daytime window
+  const now = new Date();
+  const currentHour = now.getHours(); // 0-23
+  // Show next 10 hours from now, but no later than 11 PM
+  const startHour = Math.min(Math.max(currentHour, 6), 14); // always show at least 6 AM start
   const tempDeltas = [0, 2, 4.5, 6, 7.2, 6.5, 5, 3, 1, -1.5];
 
-  return hours.map((hour, idx) => {
-    const tempF = Math.round((baseTempF + tempDeltas[idx]) * 10) / 10;
+  const formatHour = (h: number) => {
+    if (h === 0 || h === 24) return '12 AM';
+    if (h === 12) return '12 PM';
+    return h < 12 ? `${h} AM` : `${h - 12} PM`;
+  };
+
+  // Find the peak hour index (index of max delta = index 4 → startHour + 4)
+  const peakHour = startHour + 4;
+  const peakFormatted = formatHour(Math.min(peakHour, 23));
+
+  return tempDeltas.map((delta, idx) => {
+    const hour = startHour + idx;
+    const tempF = Math.round((baseTempF + delta) * 10) / 10;
     const tempC = Math.round(((tempF - 32) * 5) / 9 * 10) / 10;
-    const humidity = Math.max(15, Math.min(85, baseHumidity - tempDeltas[idx] * 1.2));
+    const humidity = Math.max(15, Math.min(85, baseHumidity - delta * 1.2));
     const feelsLikeF = calculateHeatIndex(tempF, humidity);
     const feelsLikeC = Math.round(((feelsLikeF - 32) * 5) / 9 * 10) / 10;
     const wbgtF = calculateWBGT(tempF, humidity);
+    // UV peaks at solar noon (~idx 2-4), fades at ends
     const uvIndex = Math.max(1, Math.min(12, Math.round(11 - Math.abs(idx - 3) * 1.5)));
     const riskScore = calculateRiskScore({ temperatureF: tempF, feelsLikeF, wbgtF, uvIndex });
     const riskLevel = getRiskLevelFromScore(riskScore);
 
     return {
-      hour: `${idx + 11}:00`,
-      timeFormatted: hour,
+      hour: `${hour}:00`,
+      timeFormatted: formatHour(hour),
       tempF,
       tempC,
       feelsLikeF,
@@ -233,6 +249,7 @@ export function generateHourlyTrend(baseTempF: number, baseHumidity: number, cur
       riskScore,
       riskLevel,
       uvIndex,
+      _peakLabel: peakFormatted, // internal use for chart header
     };
   });
 }

@@ -319,36 +319,151 @@ export function generateLocalCoolingCenters(centerLat: number, centerLng: number
 }
 
 /**
+ * Derives a realistic base temperature for any coordinate using regional climate bands.
+ * Both lat AND lng are factored in so nearby but distinct locations get different values.
+ */
+function interpolateBaseClimate(lat: number, lng: number): { baseTempF: number; baseHumidity: number } {
+  // Use a deterministic but coordinate-sensitive pseudo-variation so two locations
+  // at the same latitude but different longitudes produce different temperatures.
+  // The variation seeds are kept small so values stay climatologically plausible.
+  const latVariation  = Math.sin(lat  * 0.31731) * 3.4;  // ±3.4 °F based on lat
+  const lngVariation  = Math.cos(lng  * 0.17453) * 4.1;  // ±4.1 °F based on lng
+  const crossVariation = Math.sin((lat + lng) * 0.22689) * 2.2; // ±2.2 °F interaction term
+
+  let baseTempF: number;
+  let baseHumidity: number;
+
+  // Pacific Coast (CA/OR/WA): lat 32-49, lng -115 to -125
+  if (lng <= -115 && lng >= -125 && lat >= 32 && lat <= 49) {
+    baseTempF     = 74 + latVariation + lngVariation + crossVariation + (34 - lat) * 0.9;
+    baseHumidity  = 62 + Math.round(latVariation);
+  }
+  // Southwest Desert (AZ, NM, inland CA, NV): lat 31-38, lng -104 to -117
+  else if (lat <= 38 && lat >= 31 && lng >= -117 && lng <= -104) {
+    baseTempF     = 106 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 18 + Math.round(Math.abs(latVariation));
+  }
+  // Pacific Northwest / Mountain West: lat 43-49, lng -104 to -117
+  else if (lat >= 43 && lng <= -104 && lng >= -117) {
+    baseTempF     = 79 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 44 + Math.round(latVariation);
+  }
+  // Northern Plains / Great Plains: lat 43-49, lng -95 to -104
+  else if (lat >= 43 && lng <= -95 && lng >= -104) {
+    baseTempF     = 82 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 40 + Math.round(Math.abs(lngVariation));
+  }
+  // Southeast / Florida / Deep South: lat < 34, lng > -90
+  else if (lat < 34 && lng > -90) {
+    baseTempF     = 93 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 74 + Math.round(Math.abs(latVariation));
+  }
+  // Texas / Central Plains: lat 26-37, lng -93 to -105
+  else if (lat <= 37 && lng <= -93 && lng > -105) {
+    baseTempF     = 100 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 46 + Math.round(Math.abs(lngVariation));
+  }
+  // Midwest / Ohio Valley: lat 37-43, lng -80 to -95
+  else if (lat >= 37 && lat <= 43 && lng > -95 && lng <= -80) {
+    baseTempF     = 87 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 62 + Math.round(Math.abs(latVariation));
+  }
+  // Northeast / Mid-Atlantic: lat 38-45, lng > -80
+  else if (lat >= 38 && lng > -80) {
+    baseTempF     = 88 + latVariation + lngVariation + crossVariation;
+    baseHumidity  = 58 + Math.round(Math.abs(lngVariation));
+  }
+  // Default fallback — general continental US
+  else {
+    const latFactor = Math.max(0, Math.min(1, (45 - lat) / 18));
+    baseTempF    = 82 + latFactor * 18 + latVariation + lngVariation + crossVariation;
+    baseHumidity = 48 + Math.round(Math.abs(latVariation));
+  }
+
+  return {
+    baseTempF: Math.round(baseTempF * 10) / 10,
+    baseHumidity: Math.min(92, Math.max(10, Math.round(baseHumidity))),
+  };
+}
+
+/**
  * Builds a complete HeatReportData object for any location
  */
-export function buildHeatReportForLocation(location: LocationInfo, tempOverride?: number, humidityOverride?: number, aqiOverride?: number): HeatReportData {
-  // Find matching predefined city or interpolate dynamically
+export function buildHeatReportForLocation(
+  location: LocationInfo,
+  tempOrOverride?: number | {
+    temperatureF?: number;
+    feelsLikeF?: number;
+    humidity?: number;
+    wbgtF?: number;
+    surfaceTempF?: number;
+    solarRadiation?: number;
+    canopyCoveragePct?: number;
+    imperviousSurfacePct?: number;
+    airQualityAqi?: number;
+    elevationMeters?: number;
+    co2Ppm?: number;
+    methanePpb?: number;
+    cloudCoverOctas?: number;
+    pm25Index?: number;
+    pm10Index?: number;
+    no2Index?: number;
+    coolingCenters?: CoolingCenter[];
+  },
+  humidityOverride?: number,
+  aqiOverride?: number
+): HeatReportData {
+  let metricsOverride: any = null;
+  let tempOverride: number | undefined;
+  
+  if (tempOrOverride && typeof tempOrOverride === 'object') {
+    metricsOverride = tempOrOverride;
+  } else {
+    tempOverride = tempOrOverride;
+  }
+
+  // Tighter city match: within ~0.07° (~5 miles) to avoid wrong city bleed-over
   const matched = HOT_US_CITIES.find(
-    c => Math.abs(c.lat - location.lat) < 0.3 && Math.abs(c.lng - location.lng) < 0.3
+    c => Math.hypot(c.lat - location.lat, c.lng - location.lng) < 0.07
   );
 
-  const baseTempF = tempOverride ?? matched?.baseTempF ?? (92 + (Math.abs(location.lat * 7) % 18));
-  const baseHumidity = humidityOverride ?? matched?.baseHumidity ?? (30 + (Math.abs(location.lng * 5) % 45));
+  // For unmatched coordinates, use the coordinate-sensitive regional interpolation
+  // so two different California cities (e.g. SF vs Sacramento) get distinct temps.
+  const interpolated = (!matched && !tempOverride && !metricsOverride?.temperatureF) ? interpolateBaseClimate(location.lat, location.lng) : null;
+
+  let matchedBaseTempF = matched?.baseTempF;
+  let matchedBaseHumidity = matched?.baseHumidity;
+  if (matched && !tempOverride && !metricsOverride?.temperatureF) {
+    const dLat = location.lat - matched.lat;
+    const dLng = location.lng - matched.lng;
+    const offsetVariation = Math.sin(dLat * 500) * 1.8 + Math.cos(dLng * 500) * 2.2;
+    const humidityVariation = Math.sin(dLat * 300) * 4;
+    matchedBaseTempF = Math.round((matched.baseTempF + offsetVariation) * 10) / 10;
+    matchedBaseHumidity = Math.min(95, Math.max(10, Math.round(matched.baseHumidity + humidityVariation)));
+  }
+
+  const baseTempF = metricsOverride?.temperatureF ?? tempOverride ?? matchedBaseTempF ?? interpolated!.baseTempF;
+  const baseHumidity = metricsOverride?.humidity ?? humidityOverride ?? matchedBaseHumidity ?? interpolated!.baseHumidity;
 
   const temperatureF = Math.round(baseTempF * 10) / 10;
   const temperatureC = Math.round(((temperatureF - 32) * 5) / 9 * 10) / 10;
   const humidity = Math.round(baseHumidity);
-  const feelsLikeF = calculateHeatIndex(temperatureF, humidity);
+  const feelsLikeF = metricsOverride?.feelsLikeF ?? calculateHeatIndex(temperatureF, humidity);
   const feelsLikeC = Math.round(((feelsLikeF - 32) * 5) / 9 * 10) / 10;
-  const wbgtF = calculateWBGT(temperatureF, humidity);
+  const wbgtF = metricsOverride?.wbgtF ?? calculateWBGT(temperatureF, humidity);
   const wbgtC = Math.round(((wbgtF - 32) * 5) / 9 * 10) / 10;
 
   // Surface temp is typically 20-35°F higher than ambient in daytime sun
-  const surfaceTempF = Math.round((temperatureF + 28.5) * 10) / 10;
+  const surfaceTempF = metricsOverride?.surfaceTempF ?? Math.round((temperatureF + 28.5) * 10) / 10;
   const surfaceTempC = Math.round(((surfaceTempF - 32) * 5) / 9 * 10) / 10;
 
   const uvIndex = Math.min(12, Math.max(3, Math.round(temperatureF > 100 ? 11 : temperatureF > 90 ? 9 : 7)));
-  const solarRadiation = Math.round(650 + (temperatureF * 2.8));
+  const solarRadiation = metricsOverride?.solarRadiation ?? Math.round(650 + (temperatureF * 2.8));
   const windSpeedMph = Math.round((4 + (Math.abs(location.lng * 2) % 8)) * 10) / 10;
   
   // Dynamic AQI based on location coordinates, ozone formation, and temperature
   const defaultRegionalAqi = location.lat >= 43 && location.lng <= -95 ? 28 : (location.lat < 35 && location.lng < -115 ? 92 : 58);
-  const airQualityAqi = aqiOverride ?? Math.round(
+  const airQualityAqi = metricsOverride?.airQualityAqi ?? aqiOverride ?? Math.round(
     defaultRegionalAqi + (temperatureF > 100 ? 18 : temperatureF > 90 ? 8 : 0) + (humidity > 60 ? 6 : 0)
   );
 
@@ -359,11 +474,102 @@ export function buildHeatReportForLocation(location: LocationInfo, tempOverride?
   const vulnerableGroups = getVulnerableGroupRisks(riskLevel);
   const hourlyForecast = generateHourlyTrend(temperatureF, humidity);
 
+  // Derive real trend and peak window from hourly forecast
+  const firstHourTemp = hourlyForecast[0]?.tempF ?? temperatureF;
+  const lastHourTemp = hourlyForecast[hourlyForecast.length - 1]?.tempF ?? temperatureF;
+  const trendDelta = Math.round((lastHourTemp - firstHourTemp) * 10) / 10;
+  const trend: 'rising' | 'stable' | 'falling' =
+    trendDelta > 1.5 ? 'rising' : trendDelta < -1.5 ? 'falling' : 'stable';
+
+  // Peak window = hours where riskScore is at max
+  const maxScore = Math.max(...hourlyForecast.map(h => h.riskScore));
+  const peakItems = hourlyForecast.filter(h => h.riskScore >= maxScore - 2);
+  const peakStart = peakItems[0]?.timeFormatted ?? '1:00 PM';
+  const peakEnd = peakItems[peakItems.length - 1]?.timeFormatted ?? '5:00 PM';
+  const peakRiskWindow = peakStart === peakEnd ? peakStart : `${peakStart} – ${peakEnd}`;
+
+  // peak label for chart header (the single hottest hour)
+  const peakChartHour = hourlyForecast.reduce((a, b) => a.tempF > b.tempF ? a : b).timeFormatted;
+
   // Dynamic city percentile based on risk score (e.g. 78% hotter)
   const cityPercentile = Math.min(96, Math.max(20, Math.round(riskScore * 0.95)));
 
   const zones = generateLocalZones(location.lat, location.lng, temperatureF, location.city);
-  const coolingCenters = generateLocalCoolingCenters(location.lat, location.lng, location.city);
+
+  if (location.isUserLocation) {
+    const seed = Math.sin(location.lat * 3173.15) * Math.cos(location.lng * 1745.33);
+    const canopyDelta = Math.round(seed * 12);
+    const imperviousDelta = Math.round(seed * -14);
+
+    let canopy = metricsOverride?.canopyCoveragePct ?? Math.max(5, Math.min(95, 22 + canopyDelta));
+    let impervious = metricsOverride?.imperviousSurfacePct ?? Math.max(10, Math.min(98, 65 + imperviousDelta));
+    let zoneType: 'asphalt-corridor' | 'dense-urban' | 'park-canopy' | 'residential' | 'industrial-district' | 'waterfront-cooling' = 'residential';
+    let why = "Residential street microclimate with moderate yard tree canopy and standard asphalt pavement heat retention.";
+    let rec = "Maintain hydration and take shaded rests if executing tasks outdoors.";
+
+    const nameLower = location.name.toLowerCase();
+    if (nameLower.includes('park') || nameLower.includes('garden') || nameLower.includes('forest') || nameLower.includes('wood') || nameLower.includes('green')) {
+      canopy = 75;
+      impervious = 15;
+      zoneType = 'park-canopy';
+      why = "Dense mature tree canopy provides active evapotranspiration and solar shading, creating a cool refuge zone.";
+      rec = "Recommended cool routing transit corridor; rest under direct shaded areas.";
+    } else if (nameLower.includes('freeway') || nameLower.includes('highway') || nameLower.includes('interstate') || nameLower.includes('expressway') || nameLower.includes('i-') || nameLower.includes('junction') || nameLower.includes('turnpike')) {
+      canopy = 3;
+      impervious = 96;
+      zoneType = 'asphalt-corridor';
+      why = "Significant exposed concrete pavement footprint radiating intense heat energy under direct sun exposure with zero vegetative shading.";
+      rec = "Dangerous thermal exposure zone. Avoid walking or cycling along highway corridors during peak afternoon hours.";
+    } else if (nameLower.includes('industrial') || nameLower.includes('logistics') || nameLower.includes('depot') || nameLower.includes('port') || nameLower.includes('yard')) {
+      canopy = 6;
+      impervious = 92;
+      zoneType = 'industrial-district';
+      why = "Industrial zones trap massive heat loads due to flat black roofs, concrete pads, and constant heavy diesel transportation heat.";
+      rec = "Mandatory cooling canopy breaks and active hydration distribution for work crews.";
+    } else if (nameLower.includes('downtown') || nameLower.includes('financial') || nameLower.includes('plaza') || nameLower.includes('center') || nameLower.includes('mall') || nameLower.includes('street') && (nameLower.includes('broadway') || nameLower.includes('market') || nameLower.includes('main'))) {
+      canopy = 10;
+      impervious = 85;
+      zoneType = 'dense-urban';
+      why = "Concrete and glass high-rise buildings create a thermal valley, trapping radiating heat from multi-lane asphalt streets.";
+      rec = "Walk on shaded sidewalks, make use of building overhangs, and transition to indoor climate-controlled spaces.";
+    } else if (nameLower.includes('river') || nameLower.includes('lake') || nameLower.includes('water') || nameLower.includes('beach') || nameLower.includes('canal') || nameLower.includes('reservoir') || nameLower.includes('marina')) {
+      canopy = 40;
+      impervious = 20;
+      zoneType = 'waterfront-cooling';
+      why = "Water evaporation and regular thermal breezes buffer high temperatures, creating a cooling microclimate.";
+      rec = "Optimal transit path choice; utilize sunscreen and maintain fluid intake.";
+    }
+
+    const pinnedZone: HeatZone = {
+      id: 'pinned-location',
+      name: location.name,
+      neighborhood: location.district || 'Selected Location',
+      type: zoneType,
+      lat: location.lat,
+      lng: location.lng,
+      radiusMeters: 100, // Small high-resolution zone
+      tempF: temperatureF,
+      tempC: temperatureC,
+      surfaceTempF: surfaceTempF,
+      surfaceTempC: surfaceTempC,
+      riskLevel: riskLevel,
+      riskScore: riskScore,
+      treeCanopyCoverage: canopy,
+      imperviousSurface: impervious,
+      coolingRecommendation: rec,
+      whyRiskyOrCool: why,
+      elevationMeters: metricsOverride?.elevationMeters,
+      co2Ppm: metricsOverride?.co2Ppm,
+      methanePpb: metricsOverride?.methanePpb,
+      cloudCoverOctas: metricsOverride?.cloudCoverOctas,
+      pm25Index: metricsOverride?.pm25Index,
+      pm10Index: metricsOverride?.pm10Index,
+      no2Index: metricsOverride?.no2Index,
+    };
+    zones.unshift(pinnedZone);
+  }
+
+  const coolingCenters = metricsOverride?.coolingCenters ?? [];
 
   const now = new Date();
   const lastUpdated = now.toLocaleTimeString('en-US', {
@@ -388,6 +594,13 @@ export function buildHeatReportForLocation(location: LocationInfo, tempOverride?
       solarRadiation,
       windSpeedMph,
       airQualityAqi,
+      elevationMeters: metricsOverride?.elevationMeters ?? (interpolated ? Math.round(250 + Math.sin(location.lat * 100) * 120) : undefined),
+      co2Ppm: metricsOverride?.co2Ppm ?? (interpolated ? Math.round(415 + Math.cos(location.lng * 200) * 8) : undefined),
+      methanePpb: metricsOverride?.methanePpb ?? (interpolated ? Math.round(1880 + Math.sin(location.lat * 200) * 45) : undefined),
+      cloudCoverOctas: metricsOverride?.cloudCoverOctas ?? (interpolated ? Math.min(8, Math.max(0, Math.round(4 + Math.cos(location.lng * 10) * 4))) : undefined),
+      pm25Index: metricsOverride?.pm25Index ?? (interpolated ? Math.round(airQualityAqi * 0.55) : undefined),
+      pm10Index: metricsOverride?.pm10Index ?? (interpolated ? Math.round(airQualityAqi * 0.18) : undefined),
+      no2Index: metricsOverride?.no2Index ?? (interpolated ? Math.round(airQualityAqi * 0.04) : undefined),
     },
     analysis: {
       riskLevel,
@@ -396,9 +609,9 @@ export function buildHeatReportForLocation(location: LocationInfo, tempOverride?
       statusMessage,
       immediatePrecautions,
       cityPercentile,
-      trend: temperatureF > 100 ? 'rising' : 'stable',
-      trendDelta: +2.4,
-      peakRiskWindow: '1:30 PM – 5:15 PM',
+      trend,
+      trendDelta,
+      peakRiskWindow,
       vulnerableGroups,
       lastUpdated,
       hourlyForecast,

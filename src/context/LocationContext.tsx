@@ -56,7 +56,6 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           searchParams.append('label', params.label);
         }
       }
-      // Cache-bust so every new location pin always gets fresh data
       searchParams.append('_t', Date.now().toString());
       const qs = searchParams.toString();
       if (qs) {
