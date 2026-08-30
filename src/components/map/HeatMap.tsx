@@ -156,9 +156,8 @@ export function HeatMap() {
 
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>',
-      subdomains: ['a', 'b', 'c'],
+    L.tileLayer('/api/map-tile/{z}/{x}/{y}', {
+      attribution: '&copy; <a href="https://www.tomtom.com" target="_blank" rel="noopener noreferrer">TomTom</a>',
       maxZoom: 19,
       tileSize: 256,
     }).addTo(map);
