@@ -1,9 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const envPath = path.join(__dirname, '../../../../../../Desktop/Heat-Shield/.env');
-let apiKey = '991763dc1946837b058d839ad3f312ac';
-let apiURL = 'https://api.fortyguard.com';
+// Locate .env in the project root
+const envPath = path.join(__dirname, '../.env');
+let apiKey = process.env.FORTYGUARD_API_KEY || '';
+let apiURL = process.env.FORTYGUARD_API_URL || 'https://api.fortyguard.com';
 
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
@@ -15,6 +16,11 @@ if (fs.existsSync(envPath)) {
   if (urlMatch && urlMatch[1]) {
     apiURL = urlMatch[1].trim();
   }
+}
+
+if (!apiKey) {
+  console.error('Error: FORTYGUARD_API_KEY not found in .env');
+  process.exit(1);
 }
 
 const activityId = 'f42f1d4f-b5da-4750-ade0-7ec2d748c465';

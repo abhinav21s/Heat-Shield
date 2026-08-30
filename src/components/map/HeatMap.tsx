@@ -55,8 +55,6 @@ export function HeatMap() {
     const endLat = activeCc.lat;
     const endLng = activeCc.lng;
 
-    const tomtomKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY || process.env.TOMTOM_API_KEY;
-
     // Manhattan grid fallback generator to avoid direct diagonal line flying
     const generateGridFallback = () => {
       const stdPoints: [number, number][] = [
@@ -92,60 +90,34 @@ export function HeatMap() {
       return { stdPoints, coolPoints };
     };
 
-    if (!tomtomKey) {
-      setRoutesData(generateGridFallback());
-      return;
-    }
-
     setIsRouteLoading(true);
     const coolZone = report.zones.find(z => z.type === 'park-canopy' || z.type === 'waterfront-cooling');
 
     const fetchRoutes = async () => {
       try {
-        // Fetch Standard Route (direct pedestrian road routing)
-        const stdUrl = `https://api.tomtom.com/routing/1/calculateRoute/${startLat},${startLng}:${endLat},${endLng}/json?key=${tomtomKey}&travelMode=pedestrian&routeType=fastest`;
-        const stdRes = await fetch(stdUrl);
-        let stdPoints: [number, number][] = [];
-        if (stdRes.ok) {
-          const stdJson = await stdRes.json();
-          stdPoints = stdJson?.routes?.[0]?.legs?.[0]?.points.map(
-            (p: any) => [p.latitude, p.longitude] as [number, number]
-          ) || [];
-        }
-
-        // Fetch Cool Route (routing through the blended canopy waypoint)
-        let coolPoints: [number, number][] = [];
+        let routeUrl = `/api/route?startLat=${startLat}&startLng=${startLng}&endLat=${endLat}&endLng=${endLng}`;
         if (coolZone) {
           const midLat = (startLat + endLat) / 2;
           const midLng = (startLng + endLng) / 2;
-          // Interpolate a waypoint 35% of the way towards the park canopy from the direct midpoint
           const waypointLat = midLat + (coolZone.lat - midLat) * 0.35;
           const waypointLng = midLng + (coolZone.lng - midLng) * 0.35;
+          routeUrl += `&waypointLat=${waypointLat}&waypointLng=${waypointLng}`;
+        }
 
-          const coolUrl = `https://api.tomtom.com/routing/1/calculateRoute/${startLat},${startLng}:${waypointLat},${waypointLng}:${endLat},${endLng}/json?key=${tomtomKey}&travelMode=pedestrian&routeType=fastest`;
-          const coolRes = await fetch(coolUrl);
-          if (coolRes.ok) {
-            const coolJson = await coolRes.json();
-            coolPoints = coolJson?.routes?.[0]?.legs?.flatMap(
-              (leg: any) => leg.points.map((p: any) => [p.latitude, p.longitude] as [number, number])
-            ) || [];
+        const res = await fetch(routeUrl);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.stdPoints && json.stdPoints.length > 0) {
+            setRoutesData({
+              stdPoints: json.stdPoints,
+              coolPoints: json.coolPoints && json.coolPoints.length > 0 ? json.coolPoints : json.stdPoints,
+            });
+            return;
           }
         }
-
-        if (stdPoints.length === 0 || (coolZone && coolPoints.length === 0)) {
-          const fallback = generateGridFallback();
-          setRoutesData({
-            stdPoints: stdPoints.length > 0 ? stdPoints : fallback.stdPoints,
-            coolPoints: coolPoints.length > 0 ? coolPoints : fallback.coolPoints,
-          });
-        } else {
-          setRoutesData({
-            stdPoints,
-            coolPoints: coolPoints.length > 0 ? coolPoints : stdPoints
-          });
-        }
+        setRoutesData(generateGridFallback());
       } catch (err) {
-        console.warn("TomTom Routing failed, falling back to grid paths:", err);
+        console.warn("Routing calculation failed, using grid paths:", err);
         setRoutesData(generateGridFallback());
       } finally {
         setIsRouteLoading(false);
@@ -184,18 +156,9 @@ export function HeatMap() {
 
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    const tomtomKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY || process.env.TOMTOM_API_KEY;
-    const tomtomTileUrl = tomtomKey
-      ? `https://{s}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=${tomtomKey}&view=Unified`
-      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-    const tomtomAttribution = tomtomKey
-      ? '&copy; <a href="https://www.tomtom.com" target="_blank" rel="noopener noreferrer">TomTom</a>'
-      : '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>';
-
-    L.tileLayer(tomtomTileUrl, {
-      attribution: tomtomAttribution,
-      subdomains: ['a', 'b', 'c', 'd'],
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>',
+      subdomains: ['a', 'b', 'c'],
       maxZoom: 19,
       tileSize: 256,
     }).addTo(map);
