@@ -1,15 +1,21 @@
 const fs = require('fs');
 const path = require('path');
 
-const envPath = path.join(__dirname, '../../../../../../Desktop/Heat-Shield/.env');
-let tomtomKey = 'nXLLIYnoO2O8bidB1vQeNI1JElPzkgYH';
+// Locate .env in the project root
+const envPath = path.join(__dirname, '../.env');
+let tomtomKey = process.env.TOMTOM_API_KEY || process.env.NEXT_PUBLIC_TOMTOM_API_KEY || '';
 
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
-  const keyMatch = envContent.match(/^TOMTOM_API_KEY=(.*)$/m);
+  const keyMatch = envContent.match(/^TOMTOM_API_KEY=(.*)$/m) || envContent.match(/^NEXT_PUBLIC_TOMTOM_API_KEY=(.*)$/m);
   if (keyMatch && keyMatch[1]) {
     tomtomKey = keyMatch[1].trim();
   }
+}
+
+if (!tomtomKey) {
+  console.error('Error: TOMTOM_API_KEY not found in .env');
+  process.exit(1);
 }
 
 async function testPoi(lat, lng, query) {
@@ -32,7 +38,7 @@ async function testPoi(lat, lng, query) {
       console.log('Error status:', res.status);
     }
   } catch (e) {
-    console.error(e);
+    console.error('Error:', e);
   }
 }
 
