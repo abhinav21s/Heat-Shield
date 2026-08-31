@@ -79,3 +79,151 @@ npm run build
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 🛰️ FortyGuard API Request and Response
+
+HeatShield integrates directly with the **FortyGuard Temperature & Thermal Analytics API** via an asynchronous job pipeline. Below are the live request and response specifications:
+
+### 1. Submit Environmental Parameters (POST)
+
+* **Endpoint:** `POST https://api.fortyguard.com/v1/env_params`
+* **Headers:**
+  ```http
+  Content-Type: application/json
+  Accept: application/json
+  api-key: <YOUR_FORTYGUARD_API_KEY>
+  ```
+
+#### Request Body
+```json
+{
+  "lat": 33.4484,
+  "lng": -112.074,
+  "latitude": 33.4484,
+  "longitude": -112.074,
+  "point": [-112.074, 33.4484],
+  "temperature": 32,
+  "date_time": {
+    "filter_type": 1,
+    "start_date": "2026-08-31",
+    "start_time": "18:00"
+  }
+}
+```
+
+#### Response
+```json
+{
+  "error": false,
+  "status_code": 200,
+  "message": "Environment Parameters Analysis Submitted Successfully",
+  "data": {
+    "activity_id": "ab2423d5-aaa5-446c-b91e-0b1f489aa368"
+  }
+}
+```
+
+---
+
+### 2. Retrieve Thermal & Microclimate Analytics (GET)
+
+* **Endpoint:** `GET https://api.fortyguard.com/v1/status/{activity_id}`
+* **URL:** `https://api.fortyguard.com/v1/status/0eaea834-2a2a-4de9-8c55-4ed0329ac9ab`
+* **Headers:**
+  ```http
+  Accept: application/json
+  api-key: <YOUR_FORTYGUARD_API_KEY>
+  ```
+
+#### Response
+```json
+{
+  "error": false,
+  "status_code": 200,
+  "message": "Completed",
+  "data": {
+    "activity_id": "0eaea834-2a2a-4de9-8c55-4ed0329ac9ab",
+    "status": "Completed",
+    "result": {
+      "metadata": {
+        "timezone": "GMT-7",
+        "timezone_offset_hours": -7,
+        "time_range": {
+          "start": "2026-08-31T18:00:00-07:00",
+          "end": "2026-08-31T18:00:00-07:00",
+          "interval": "1h",
+          "count": 1
+        },
+        "timestamps": [
+          "2026-08-31T18:00:00-07:00"
+        ]
+      },
+      "locations": [
+        {
+          "lat": 33.4484,
+          "lon": -112.074,
+          "elevation": 333.0,
+          "temperature": 32.0,
+          "parameters": {
+            "heat_index_celsius": [
+              31.9
+            ],
+            "apparent_temperature_celsius": [
+              34.0
+            ],
+            "relative_humidity_percent": [
+              38.2
+            ],
+            "precipitation_mm": [
+              0.0
+            ],
+            "cloud_cover_octas": [
+              25.0
+            ],
+            "wet_bulb_temperature_celsius": [
+              22.2
+            ],
+            "air_quality:idx": [
+              50.9
+            ],
+            "air_quality_pm2p5:idx": [
+              50.9
+            ],
+            "air_quality_pm10:idx": [
+              17.7
+            ],
+            "air_quality_no2:idx": [
+              1.7
+            ],
+            "aqi_us_co": [
+              1.1
+            ],
+            "air_quality_o3:idx": [
+              45.9
+            ],
+            "air_quality_so2:idx": [
+              0.2
+            ],
+            "methane_ppb": [
+              1989.6
+            ],
+            "co2_ppm": [
+              449.0
+            ]
+          },
+          "solar_irradiance": {
+            "clear_sky": {
+              "ghi": 103.34,
+              "dni": 364.52,
+              "dhi": 36.46
+            },
+            "description": "The above values provide insights into the solar energy available at the specific location at 2026-08-31 18:00. GHI represents the total solar energy, DNI focuses on direct sunlight, and DHI accounts for scattered and diffuse radiation."
+          }
+        }
+      ]
+    }
+  }
+}
+```
